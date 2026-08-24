@@ -1,4 +1,4 @@
-/* Fusion AI Agent Stack Explorer — dark-first theme, light variant kept usable. */
+/* Fusion Agent Stack Explorer — dark-first theme, light variant kept usable. */
 
 :root {
   color-scheme: dark light;
@@ -52,8 +52,15 @@
   --t-other: #8a8a8a;
 }
 
+/* Three theme states: follow the system (no data-theme), or force one.
+   The light palette is written twice because CSS has no way to alias a
+   selector — once for "system says light and the viewer has not forced dark",
+   once for "the viewer chose light". Keep the two blocks in sync.
+   `color-scheme` is set alongside so native selects, scrollbars and focus rings
+   follow the forced theme instead of the OS. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
+    color-scheme: light;
     --bg: #f6f4ef;
     --bg-deep: #efece5;
     --panel: #fffefb;
@@ -68,6 +75,24 @@
     --accent-soft: #fbeee2;
   }
 }
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f4ef;
+  --bg-deep: #efece5;
+  --panel: #fffefb;
+  --panel-2: #f2efe8;
+  --panel-3: #e8e4da;
+  --border: #d9d4c8;
+  --border-soft: #e5e1d6;
+  --fg: #1e1c19;
+  --fg-mid: #57534c;
+  --fg-dim: #857f75;
+  --accent: #b8590f;
+  --accent-soft: #fbeee2;
+}
+
+:root[data-theme="dark"] { color-scheme: dark; }
 
 * { box-sizing: border-box; }
 
@@ -120,6 +145,38 @@ body { display: flex; flex-direction: column; }
 .tabstrip button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
 .tabstrip .spacer { flex: 1 1 auto; }
 .tabstrip .build { padding: 9px 14px; }
+
+/* Theme switch. Selectors are qualified with .tabstrip because `.tabstrip button`
+   above matches these too at equal specificity — and, being later in the file,
+   would win and give the segmented control full tab-sized padding. */
+.tabstrip .theme {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  align-self: center;
+  margin-right: 10px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--panel);
+}
+.tabstrip .theme button {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.tabstrip .theme button:hover { color: var(--fg-mid); }
+.tabstrip .theme button[aria-pressed="true"] {
+  background: var(--panel-3);
+  color: var(--fg);
+}
 
 /* ------------------------------------------------------------- header */
 

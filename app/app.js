@@ -1,4 +1,4 @@
-/* Fusion AI Agent Stack Explorer — knowledge-graph explorer for the Oracle AI Studio corpus.
+/* Fusion Agent Stack Explorer — knowledge-graph explorer for the Oracle AI Studio corpus.
  *
  * Reads window.FUSION_GRAPH (tools/build-search-app.mjs). Metrics — pagerank,
  * betweenness, bridgeScore, community, blastRadius, clustering, articulation —
@@ -32,7 +32,7 @@ for (const e of EDGES) {
 }
 
 const hay = NODES.map((n) =>
-  [n.label, n.code, n.summary, n.workflow, n.family, n.product, n.nodeType, n.type, n.body]
+  [n.label, n.code, n.summary, n.workflow, n.family, n.product, n.nodeType, n.type, n.body, n.owner, n.section]
     .filter(Boolean).join('  ').toLowerCase());
 
 const relCounts = new Map();
@@ -45,13 +45,20 @@ const COMMUNITIES = new Set(NODES.map((n) => n.community).filter((c) => c !== un
  * `stackRole` distinguishes a supervising team from a plain agent workflow.
  */
 const STACK = [
-  { layer: 5, name: 'Business outcomes', note: 'the result', color: '#f2b57a' },
-  { layer: 4, name: 'Agentic applications', note: 'the product', color: '#c58af9' },
-  { layer: 3, name: 'Agent teams', note: 'supervisor + workflow', color: '#8ab4f8' },
-  { layer: 2, name: 'Agents', note: 'compose tools', color: '#5ec8bf' },
-  { layer: 1, name: 'Tools', note: 'used by agents', color: '#6dd58c' },
-  { layer: 0, name: 'Agent internals', note: 'workflow steps', color: '#6d8fc4' },
-  { layer: -1, name: 'Authoring & governance', note: 'skills, prompts, CLI, policy', color: '#9aa0a6' },
+  // the authoring corpus — the skill package this repo exists to ship
+  { layer: 11, name: 'Skills', note: 'the entry point', color: '#f28b82', half: 'authoring' },
+  { layer: 10, name: 'Playbooks & references', note: 'the prose a skill routes to', color: '#f6aea9', half: 'authoring' },
+  { layer: 9, name: 'Rules & conventions', note: 'what that prose requires and forbids', color: '#fbc02d', half: 'authoring' },
+  { layer: 8, name: 'Specs & vocabulary', note: 'artifact types, node types, test kinds', color: '#e8c46a', half: 'authoring' },
+  { layer: 7, name: 'CLI surface', note: 'the commands that enforce it', color: '#bdae6d', half: 'authoring' },
+  // the sample corpus — Oracle's worked example of that contract
+  { layer: 5, name: 'Business outcomes', note: 'the result', color: '#f2b57a', half: 'sample' },
+  { layer: 4, name: 'Agentic applications', note: 'the product', color: '#c58af9', half: 'sample' },
+  { layer: 3, name: 'Agent teams', note: 'supervisor + workflow', color: '#8ab4f8', half: 'sample' },
+  { layer: 2, name: 'Agents', note: 'compose tools', color: '#5ec8bf', half: 'sample' },
+  { layer: 1, name: 'Tools', note: 'used by agents', color: '#6dd58c', half: 'sample' },
+  { layer: 0, name: 'Agent internals', note: 'workflow steps', color: '#6d8fc4', half: 'sample' },
+  { layer: -1, name: 'Findings', note: 'unwired branches, unresolved refs', color: '#9aa0a6', half: 'findings' },
 ];
 const STACK_BY_LAYER = new Map(STACK.map((x) => [x.layer, x]));
 const layerColor = (l) => STACK_BY_LAYER.get(l)?.color ?? cssVar('--t-other');
@@ -63,6 +70,7 @@ const CLASSIFICATION_RELS = new Set([
   'has_verb', 'routes_artifact', 'operates_on', 'documents_artifact',
   'targets_family', 'uses_model', 'governed_by', 'reads_app_context',
   'routes_app_stage', 'has_issue', 'is_tool_type', 'uses_tool_type',
+  'is_node_type', 'operates_on_test', 'exercises',
 ]);
 const FLOW_RELS = new Set(['flows_to', 'converges_to', 'on_error_to']);
 const DATA_RELS = new Set(['reads_output_of', 'calls_bo_function', 'uses_business_object',
@@ -94,13 +102,13 @@ const sci = (v) => (typeof v === 'number' ? (v < 1e-3 ? v.toExponential(1) : v.t
 const CSS = getComputedStyle(document.documentElement);
 const cssVar = (name, fallback = '#888') => CSS.getPropertyValue(name).trim() || fallback;
 
-const typeColor = (() => {
-  const cache = new Map();
-  return (t) => {
-    if (!cache.has(t)) cache.set(t, cssVar(`--t-${t}`, cssVar('--t-other')));
-    return cache.get(t);
-  };
-})();
+// Memoised because paint() asks for a colour per node per frame. The cache holds
+// resolved values from one theme, so setTheme() has to drop it.
+const typeColorCache = new Map();
+const typeColor = (t) => {
+  if (!typeColorCache.has(t)) typeColorCache.set(t, cssVar(`--t-${t}`, cssVar('--t-other')));
+  return typeColorCache.get(t);
+};
 
 /** Golden-angle hue so adjacent community ids never share a colour. */
 const hashColor = (k) => {
@@ -137,9 +145,9 @@ const state = {
   rtab: 'node',
   focus: null,
   depth: 1,
-  colorBy: 'layer',
+  colorBy: 'community',
   sizeBy: 'pagerank',
-  layout: 'stack',
+  layout: 'concentric',
   hiddenRels: new Set(CLASSIFICATION_RELS),
   lab: { q: '', layer: '', type: '', family: '', flag: '', sort: 'pagerank', dir: -1 },
   browse: { q: '', by: 'section', open: new Set(['Applications']), expanded: new Set() },
@@ -1059,12 +1067,14 @@ function renderFocusPanel() {
  */
 /** Oracle's console order, so the list reads like the product navigation. */
 const SECTION_ORDER = [
+  'Authoring · Skills', 'Authoring · Playbooks', 'Authoring · Rules',
+  'Authoring · Vocabulary', 'Authoring · CLI',
   'Applications', 'Workflows',
   'Resources · Agents', 'Resources · Supervisor Agents', 'Resources · Tools',
   'Resources · Topics', 'Resources · Business Objects', 'Resources · Deeplinks',
   'Resources · Functions', 'Resources · Document Schema',
   'Connectors', 'Policy Models', 'Approvals',
-  'Developer tooling', 'Documentation', 'Findings', 'Derived',
+  'Documentation', 'Findings', 'Derived',
 ];
 
 function browseGroups() {
@@ -1103,14 +1113,64 @@ function browseGroups() {
       }));
   }
 
-  const groups = [
-    { name: 'Agentic applications', note: 'the product', color: layerColor(4),
-      items: of((x) => x.type === 'app'), sub: (x) => [x.family, x.pagePattern].filter(Boolean).join(' · ') },
-    { name: 'Agent teams', note: 'supervisor + workflow', color: layerColor(3),
-      items: of((x) => x.layer === 3), sub: (x) => [x.family, x.product, x.stackRole].filter(Boolean).join(' · ') },
-    { name: 'Agents', note: 'compose tools', color: layerColor(2),
-      items: of((x) => x.layer === 2), sub: (x) => [x.family, x.product].filter(Boolean).join(' · ') },
+  // The authoring corpus comes first: it is what the repo ships. The sample
+  // apps follow as the worked example.
+  const anyOf = (pred) => NODES.filter((x) => pred(x) && match(x))
+    .sort((a, b) => String(a.label).localeCompare(String(b.label)));
+  const PROMPT_ROLES = [
+    ['node-spec', 'Workflow node specs'],
+    ['builder', 'Artifact builders'],
+    ['cli-compat', 'CLI compatibility contracts'],
+    ['test-authoring', 'Test authoring'],
+    ['debugging', 'Debugging'],
+    ['vibe-agent', 'Vibe agents'],
+    ['conventions', 'Conventions'],
+    ['guardrails', 'Guardrails'],
+    ['app-playbook', 'App playbooks'],
+    ['handoff', 'Handoff'],
+    ['best-practices', 'Best practices'],
+    ['ingestion', 'Ingestion'],
+    ['index', 'Indexes'],
+    ['reference', 'Other references'],
   ];
+  const groups = [
+    { name: 'Skills', note: 'the entry point', color: layerColor(11),
+      items: of((x) => x.type === 'skill' || x.type === 'skillResource'),
+      sub: (x) => (x.type === 'skill' ? `${x.ruleCount ?? 0} rules` : x.kind ?? '') },
+  ];
+  for (const [role, title] of PROMPT_ROLES) {
+    groups.push({ name: title, note: 'reference', color: layerColor(10),
+      items: of((x) => x.type === 'promptReference' && x.promptRole === role),
+      sub: (x) => [`${x.lines ?? 0} lines`, `${x.ruleCount ?? 0} rules`].join(' · ') });
+  }
+  // rules are components of their section, so they need the unfiltered list
+  for (const [modality, title] of [
+    ['prohibition', 'Rules · prohibitions'],
+    ['obligation', 'Rules · obligations'],
+    ['recommendation', 'Rules · recommendations'],
+  ]) {
+    groups.push({ name: title, note: 'rule', color: layerColor(9),
+      items: anyOf((x) => x.type === 'rule' && x.modality === modality),
+      sub: (x) => [x.owner, x.section].filter(Boolean).join(' · ') });
+  }
+  groups.push({ name: 'Workflow node types', note: 'vocabulary', color: layerColor(8),
+    items: of((x) => x.type === 'workflowNodeType'),
+    sub: (x) => `${x.specified ? 'specified' : 'no spec'} · ${x.instanceCount ?? 0} in samples` });
+  groups.push({ name: 'Test kinds', note: 'vocabulary', color: layerColor(8),
+    items: of((x) => x.type === 'testKind'), sub: (x) => x.summary ?? '' });
+  groups.push({ name: 'Artifact types', note: 'vocabulary', color: layerColor(8),
+    items: of((x) => x.type === 'artifactType'), sub: (x) => x.ext ?? '' });
+  groups.push({ name: 'CLI commands', note: 'the enforcing surface', color: layerColor(7),
+    items: of((x) => x.type === 'cliCommand'), sub: (x) => [x.group, x.verb].filter(Boolean).join(' · ') });
+
+  groups.push(
+    { name: 'Agentic applications', note: 'sample · the product', color: layerColor(4),
+      items: of((x) => x.type === 'app'), sub: (x) => [x.family, x.pagePattern].filter(Boolean).join(' · ') },
+    { name: 'Agent teams', note: 'sample · supervisor + workflow', color: layerColor(3),
+      items: of((x) => x.layer === 3), sub: (x) => [x.family, x.product, x.stackRole].filter(Boolean).join(' · ') },
+    { name: 'Agents', note: 'sample · compose tools', color: layerColor(2),
+      items: of((x) => x.layer === 2), sub: (x) => [x.family, x.product].filter(Boolean).join(' · ') },
+  );
 
   // tools, split by supported type so the taxonomy is visible while browsing
   const toolish = new Set(['tool', 'businessObject', 'deeplink']);
@@ -1122,15 +1182,10 @@ function browseGroups() {
   }
   for (const [k, items] of [...byType].sort((a, b) => b[1].length - a[1].length)) {
     groups.push({
-      name: k, note: 'tool', color: layerColor(1), items,
+      name: k, note: 'sample · tool', color: layerColor(1), items,
       sub: (x) => [x.type, x.family, x.product].filter(Boolean).join(' · '),
     });
   }
-
-  groups.push({ name: 'Skills & prompt references', note: 'authoring', color: layerColor(-1),
-    items: of((x) => x.type === 'skill' || x.type === 'promptReference'), sub: (x) => x.type });
-  groups.push({ name: 'CLI commands', note: 'authoring', color: layerColor(-1),
-    items: of((x) => x.type === 'cliCommand'), sub: (x) => [x.group, x.verb].filter(Boolean).join(' · ') });
 
   return groups.filter((g) => g.items.length);
 }
@@ -1359,6 +1414,12 @@ function renderRight() {
       n.studioSection && n.studioSection !== 'Derived' ? chip(n.studioSection) : null,
       n.stackRole ? chip(n.stackRole) : null,
       n.appExposed ? chip('app-exposed') : null,
+      // the authoring corpus: what kind of statement, what kind of reference
+      n.modality ? chip(`${n.modality} · "${n.marker}"`, n.modality === 'prohibition' ? 'hot' : undefined) : null,
+      n.promptRole ? chip(n.promptRole) : null,
+      n.ruleCount ? chip(`${n.ruleCount} rules`) : null,
+      n.type === 'workflowNodeType' && n.specified && !n.usedHere ? chip('specified, unused here', 'hot') : null,
+      n.type === 'workflowNodeType' && !n.specified ? chip('no spec', 'hot') : null,
       n.origin === 'local' ? chip('your environment', 'hot') : null));
   }
 
@@ -1534,11 +1595,11 @@ function renderCredit() {
 }
 
 const LAYOUT_HINTS = {
-  stack: 'One band per layer of the Agent Studio hierarchy — outcomes on top, tools at the bottom. Start here.',
+  stack: 'Two stacks: the skill package this repo ships on top (skills → references → rules → vocabulary → CLI), Oracle\'s sample apps below it as the worked example.',
   force: 'Force directed. Good for spotting clusters and bridges around the focus.',
   layered: 'Levels follow edge direction from the focus — the one that reads a workflow pipeline left to right.',
   radial: 'One ring per hop, so distance from the focus is literal.',
-  concentric: 'Groups by Louvain community, making cluster membership obvious.',
+  concentric: 'Groups by Louvain community, making cluster membership obvious. The default.',
   grid: 'Ranked grid ordered by the current Size metric. Best for comparing magnitudes.',
 };
 
@@ -1876,7 +1937,10 @@ function buildTools() {
 
 function switchTab(t) {
   state.tab = t;
-  for (const b of document.querySelectorAll('.tabstrip button')) {
+  // `[data-tab]` and not a bare `button`: the tab strip also holds the theme
+  // switch, and matching those made a theme click call switchTab(undefined),
+  // which hid both sections and left a blank page.
+  for (const b of document.querySelectorAll('.tabstrip button[data-tab]')) {
     b.setAttribute('aria-selected', b.dataset.tab === t ? 'true' : 'false');
   }
   $('#graph').hidden = t !== 'graph';
@@ -1884,7 +1948,7 @@ function switchTab(t) {
   if (t === 'graph') { paint(); renderStatus(); } else renderLab();
 }
 
-for (const b of document.querySelectorAll('.tabstrip button')) {
+for (const b of document.querySelectorAll('.tabstrip button[data-tab]')) {
   b.addEventListener('click', () => switchTab(b.dataset.tab));
 }
 for (const b of document.querySelectorAll('.rtabs button')) {
@@ -1919,6 +1983,66 @@ $('#legend-all').addEventListener('click', () => {
   else state.hiddenRels = new Set(CLASSIFICATION_RELS);
   refreshGraph();
 });
+// ---------------------------------------------------------------- theme
+
+/**
+ * Three states, because "follow the system" is a real preference and not the
+ * same as picking one. The choice is stored per browser and never leaves the
+ * page; `index.html` applies it before the first paint, and this only has to
+ * keep the buttons, the stored value and the canvas in step.
+ *
+ * The canvas is not CSS — it reads `--fg`, `--panel`, `--border` and the type
+ * palette through cssVar() at draw time — so a theme change has to redraw it and
+ * re-render the panels that inline a colour. Nothing else in the app caches a
+ * colour except typeColor, which is dropped here.
+ */
+const THEME_KEY = 'fusion-explorer-theme';
+const THEME_BUTTONS = [...document.querySelectorAll('#theme button')];
+
+function storedTheme() {
+  try {
+    const v = localStorage.getItem(THEME_KEY);
+    return v === 'light' || v === 'dark' ? v : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+function setTheme(mode, { persist = true } = {}) {
+  const root = document.documentElement;
+  if (mode === 'auto') delete root.dataset.theme;
+  else root.dataset.theme = mode;
+
+  if (persist) {
+    try {
+      if (mode === 'auto') localStorage.removeItem(THEME_KEY);
+      else localStorage.setItem(THEME_KEY, mode);
+    } catch {
+      /* private mode or blocked storage: the switch still works for this visit */
+    }
+  }
+
+  for (const b of THEME_BUTTONS) {
+    b.setAttribute('aria-pressed', b.dataset.setTheme === mode ? 'true' : 'false');
+  }
+
+  typeColorCache.clear();
+  paint();
+  renderFocusPanel();
+  renderRight();
+  renderLegend();
+  if (state.tab === 'lab') renderLab();
+}
+
+for (const b of THEME_BUTTONS) {
+  b.addEventListener('click', () => setTheme(b.dataset.setTheme));
+}
+// In auto, a viewer flipping their OS theme mid-session should follow along —
+// the CSS does that on its own, but the canvas does not.
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (storedTheme() === 'auto') setTheme('auto', { persist: false });
+});
+
 $('#search-open').addEventListener('click', openPalette);
 $('#toggle-left').addEventListener('click', () => setCollapsed('left', !state.leftCollapsed));
 $('#toggle-right').addEventListener('click', () => setCollapsed('right', !state.rightCollapsed));
@@ -1974,3 +2098,7 @@ buildTools();
 state.focus = null;
 refreshGraph();
 renderLab();
+
+// index.html already applied the stored theme to <html>; this only syncs the
+// buttons to it, now that there is something on the canvas to redraw.
+setTheme(storedTheme(), { persist: false });

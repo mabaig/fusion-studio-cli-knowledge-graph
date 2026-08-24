@@ -3,8 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Fusion AI Agent Stack Explorer</title>
+<title>Fusion Agent Stack Explorer</title>
+<!-- A LinkedIn-style badge: rounded square, lowercase wordmark. Inline so the
+     single-file bundle stays self-contained. rgb() rather than #0A66C2, because a
+     bare '#' inside a data: URI starts a fragment and would truncate the SVG.
+     textLength pins the wordmark to 50 of 64 units so four letters fit whatever
+     sans the viewer actually has, and the baseline is set explicitly rather than
+     with dominant-baseline, which favicon renderers honour inconsistently. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' ry='14' fill='rgb(10,102,194)'/%3E%3Ctext x='32' y='40' text-anchor='middle' textLength='50' lengthAdjust='spacingAndGlyphs' font-family='Helvetica,Arial,sans-serif' font-size='24' font-weight='700' fill='white'%3Ebaig%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="app.css">
+<script>
+/* Applied before the first paint, so a viewer on a dark system who chose light
+   does not get a dark flash while the 7 MB data.js parses. app.js owns the
+   buttons and the canvas repaint; this only sets the attribute. */
+try {
+  var t = localStorage.getItem('fusion-explorer-theme');
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+} catch (e) { /* private mode, blocked storage: fall through to the system theme */ }
+</script>
 </head>
 <body>
 
@@ -12,12 +28,17 @@
   <button role="tab" data-tab="graph" aria-selected="true">Graph</button>
   <button role="tab" data-tab="lab" aria-selected="false">Data Lab</button>
   <span class="spacer"></span>
+  <div class="theme" id="theme" role="group" aria-label="Colour theme">
+    <button type="button" data-set-theme="auto" aria-pressed="true" title="Follow the system setting">Auto</button>
+    <button type="button" data-set-theme="light" aria-pressed="false" title="Always light">Light</button>
+    <button type="button" data-set-theme="dark" aria-pressed="false" title="Always dark">Dark</button>
+  </div>
   <span class="build lbl" id="build"></span>
 </nav>
 
 <header>
   <div class="brand">
-    <h1>Agent Stack Explorer</h1>
+    <h1>Fusion Agent Stack Explorer</h1>
     <span class="tag">Oracle Fusion AI &mdash; release-26C</span>
   </div>
 
@@ -26,9 +47,9 @@
   <div class="controls">
     <label class="sel"><span>Color</span>
       <select id="color-by">
+        <option value="community">Community</option>
         <option value="layer">Stack layer</option>
         <option value="type">Kind</option>
-        <option value="community">Community</option>
         <option value="family">Family</option>
         <option value="nodeType">Node type</option>
       </select>
@@ -68,11 +89,11 @@
         <input id="depth" type="range" min="1" max="3" value="1">
         <div class="lbl"><span>Layout</span></div>
         <select id="layout">
+          <option value="concentric">Concentric by community</option>
           <option value="stack">Agent Studio stack</option>
           <option value="force">Force directed</option>
           <option value="layered">Layered (flow)</option>
           <option value="radial">Radial by hop</option>
-          <option value="concentric">Concentric by community</option>
           <option value="grid">Grid by rank</option>
         </select>
         <div class="hint" id="layout-hint"></div>
