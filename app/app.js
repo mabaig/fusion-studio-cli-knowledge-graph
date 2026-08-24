@@ -144,7 +144,7 @@ const state = {
   tab: 'graph',
   rtab: 'node',
   focus: null,
-  depth: 1,
+  depth: 3,
   colorBy: 'community',
   sizeBy: 'pagerank',
   layout: 'concentric',
@@ -2088,14 +2088,28 @@ document.querySelector('.stage').append(el('div', { class: 'overlay ov-empty', i
 $('#layout').value = state.layout;
 $('#color-by').value = state.colorBy;
 $('#layout-hint').textContent = LAYOUT_HINTS[state.layout];
+// drive the depth control from state rather than the markup, so changing the
+// default in one place cannot leave the slider and the readout disagreeing
+$('#depth').value = String(state.depth);
+$('#depth-v').textContent = `${state.depth} hop${state.depth > 1 ? 's' : ''}`;
 renderCounts();
 renderCredit();
 buildTools();
 
-// First load starts with nothing selected: the left panel lists what is
-// available, so the entry point is a deliberate choice rather than an arbitrary
-// seed node.
-state.focus = null;
+/**
+ * First load opens on `aistudio init` at 3 hops. It is the corpus's highest
+ * betweenness node, so its neighbourhood reaches the skills, the references
+ * they ship, the commands those references document and the artifact types
+ * those commands touch — a slice that shows what the graph is for without
+ * anyone having to pick a starting point.
+ *
+ * The CLI list comes from a captured `aistudio --help`, and the publish
+ * workflow tolerates that capture failing, so a build with no cliCommand nodes
+ * is legitimate. Fall back to the browse catalogue rather than focusing an id
+ * that is not there.
+ */
+const SEED_FOCUS = 'cmd:init';
+state.focus = byId.has(SEED_FOCUS) ? SEED_FOCUS : null;
 refreshGraph();
 renderLab();
 
