@@ -79,6 +79,10 @@ const CLASSIFICATION_RELS = new Set([
   'documents_artifact', 'targets_family', 'uses_model', 'governed_by',
   'reads_app_context', 'routes_app_stage', 'has_issue',
   'is_tool_type', 'uses_tool_type',
+  // A workflow node "is a" LLM the same way a tool "is a" Deep Link Tool: a
+  // label, not a dependency. Left in, the 1,686 node->type edges would make
+  // CODE and LLM the most central things in the corpus purely by being names.
+  'is_node_type', 'operates_on_test', 'exercises',
 ]);
 const INCLUDE_ALL = argv.includes('--include-classification');
 

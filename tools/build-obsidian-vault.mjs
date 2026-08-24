@@ -41,7 +41,13 @@ const FOLDER = {
   tool: 'Tools',
   deeplink: 'Deeplinks',
   skill: 'Skills',
+  skillResource: 'Skills/Resources',
   promptReference: 'Prompt References',
+  docSection: 'Sections',
+  rule: 'Rules',
+  workflowNodeType: 'Node Types',
+  testKind: 'Testing',
+  toolType: 'Taxonomy',
   cliCommand: 'CLI Commands',
   doc: 'Docs',
   appPanel: 'App Panels',
@@ -58,7 +64,6 @@ const FOLDER = {
   commandVerb: 'Concepts',
   policy: 'Concepts',
   issue: 'Findings',
-  docSection: null, // rolled into their skill note
 };
 
 /** Structural workflow nodes carry no searchable content — diagram only. */
@@ -104,6 +109,12 @@ for (const n of graph.nodes) {
     dir = `${folder}/${sanitize(n.app ?? 'unknown')}`;
   } else if (n.type === 'restResource') {
     base = sanitize(n.label.replace(/^\//, '').replace(/\//g, ' · '));
+  } else if (n.type === 'rule' || n.type === 'docSection') {
+    // grouped under the reference that states them; a rule's label is a whole
+    // sentence, so the filename is a readable prefix and the note carries the
+    // full text in its body
+    dir = `${folder}/${sanitize(String(n.owner ?? n.parent ?? 'unknown').replace(/\.md$/, ''))}`;
+    base = sanitize(n.label).slice(0, 80).replace(/[\s.·-]+$/, '') || 'rule';
   }
   notePath.set(n.id, claim(dir, base));
 }
@@ -446,6 +457,13 @@ function tagsFor(n) {
   if (n.group) t.push(`group/${String(n.group).replace(/[^a-z]+/gi, '-')}`);
   if (n.verb) t.push(`verb/${n.verb}`);
   if (n._stub) t.push('stub/platform-seeded');
+  // the authoring corpus: what kind of statement, what kind of reference, and
+  // which half of the repo a note belongs to
+  if (n.modality) t.push(`rule/${n.modality}`);
+  if (n.promptRole) t.push(`prompt/${n.promptRole}`);
+  if (n.corpusRole) t.push(`corpus/${n.corpusRole}`);
+  if (n.type === 'workflowNodeType') t.push(n.specified ? 'spec/specified' : 'spec/undocumented');
+  if (n.type === 'workflowNodeType' && !n.usedHere) t.push('spec/unused-in-samples');
   if (n.issues?.length) t.push('finding/has-issue');
   if (n.articulation) t.push('finding/cut-vertex');
   if (n.layerName) t.push(`layer/${String(n.layerName).replace(/[^a-z]+/gi, '-').toLowerCase()}`);
@@ -477,6 +495,14 @@ function noteFor(n) {
     platformSeeded: n._stub,
     source: n.source_file,
     layer: n.layerName,
+    corpus: n.corpusRole,
+    modality: n.modality,
+    marker: n.marker,
+    promptRole: n.promptRole,
+    ownedBy: n.owner ?? n.parent,
+    ruleCount: n.ruleCount,
+    specified: n.specified,
+    instanceCount: n.instanceCount,
     toolType: n.toolTypeName,
     stackRole: n.stackRole,
     appExposed: n.appExposed,
@@ -509,6 +535,23 @@ function noteFor(n) {
     parts.push(
       `> [!danger] Structural single point of failure\n> Removing this node disconnects its component — nothing else bridges the two sides.`,
     );
+  }
+  if (n.type === 'rule') {
+    const CALLOUT = { prohibition: 'danger', obligation: 'warning', recommendation: 'tip' };
+    parts.push(
+      `> [!${CALLOUT[n.modality] ?? 'note'}] ${n.modality} · signalled by "${n.marker}"\n> ${n.body}`,
+    );
+  }
+  if (n.type === 'workflowNodeType') {
+    if (n.specified && !n.usedHere) {
+      parts.push(
+        `> [!info] Specified, never exercised here\n> The skill package ships an authoring spec for this node type, but no sample workflow uses one.`,
+      );
+    } else if (!n.specified) {
+      parts.push(
+        `> [!warning] Used without a spec\n> ${n.instanceCount} node(s) in the sample corpus are of this type, but the skill package ships no \`workflow-node-prompts\` entry for it.`,
+      );
+    }
   }
   if (n.pagerank !== undefined) {
     parts.push(
@@ -577,13 +620,21 @@ function noteFor(n) {
   const rels = relationSections(n.id, { skip });
   if (rels) parts.push(`## Relationships\n\n${rels}`);
 
-  // skill notes absorb their section list
-  if (n.type === 'skill') {
-    const secs = outs(n.id)
-      .filter((e) => e.relation === 'contains' && e.context === 'section')
-      .map((e) => byId.get(e.target)?.label)
-      .filter(Boolean);
-    if (secs.length) parts.push(`## Sections in SKILL.md\n${secs.map((s) => `- ${s}`).join('\n')}`);
+  // a skill or reference lists the rules it states, strongest first, so the
+  // note reads as the contract rather than as a link dump
+  if (n.type === 'skill' || n.type === 'promptReference' || n.type === 'docSection') {
+    const ORDER = { prohibition: 0, obligation: 1, recommendation: 2 };
+    const stated = outs(n.id)
+      .filter((e) => e.relation === 'states')
+      .map((e) => byId.get(e.target))
+      .filter(Boolean)
+      .sort((a, b) => (ORDER[a.modality] ?? 9) - (ORDER[b.modality] ?? 9));
+    if (stated.length) {
+      parts.push(
+        `## Rules stated here (${stated.length})\n` +
+        stated.map((r) => `- **${r.modality}** — ${link(r.id, r.body)}`).join('\n'),
+      );
+    }
   }
 
   return parts.join('\n\n') + sourceLine(n);
@@ -663,20 +714,159 @@ const maps = {
       ['Description', (n) => clean(n.summary)],
     ]),
   ].join('\n\n'),
-  'Skills and Prompts': [
-    '## Skills',
-    mocTable(byType('skill').sort(sortByLabel), [
-      ['Skill', (n) => link(n.id)],
-      ['Lines', (n) => n.lines ?? ''],
-      ['Description', (n) => clean(n.summary, 200)],
-    ]),
-    '## Prompt references',
-    mocTable(byType('promptReference').sort(sortByLabel), [
-      ['Reference', (n) => link(n.id)],
-      ['Lines', (n) => n.lines ?? ''],
-      ['Purpose', (n) => clean(n.summary, 140)],
-    ]),
-  ].join('\n\n'),
+  'Skills and Prompts': (() => {
+    // grouped by what each reference is *for* — the repo ships nine artifact
+    // types as a builder/cli-compat pair, 25 node specs, three test-authoring
+    // guides and a handful of agent personas, and that shape is the map
+    const ROLE_ORDER = [
+      ['node-spec', 'Workflow node specs', 'one per backend node type; the rules a node of that type must satisfy'],
+      ['builder', 'Artifact builders', 'how to author an artifact type from scratch'],
+      ['cli-compat', 'CLI compatibility contracts', 'what the CLI will actually accept for that artifact'],
+      ['test-authoring', 'Test authoring', 'how tests are generated, recorded, run and summarised'],
+      ['debugging', 'Debugging', 'how to isolate a failing node'],
+      ['vibe-agent', 'Vibe agents', 'the builder-UI agent personas'],
+      ['conventions', 'Conventions', 'file layout, naming, lifecycle'],
+      ['best-practices', 'Best practices', ''],
+      ['ingestion', 'Ingestion', ''],
+      ['guardrails', 'Guardrails', 'per-app-skill limits on what may be created or changed'],
+      ['handoff', 'Handoff', 'how an app skill delegates to the base aistudio skill'],
+      ['app-playbook', 'App playbooks', 'the workflow an app skill walks the user through'],
+      ['index', 'Indexes', ''],
+      ['reference', 'Other references', ''],
+    ];
+    const out = [
+      'The three skills, and the ' + byType('promptReference').length +
+      ' references they route to, grouped by role. `ruleCount` is how many normative statements the graph found in each.',
+      '## Skills',
+      mocTable(byType('skill').sort(sortByLabel), [
+        ['Skill', (n) => link(n.id)],
+        ['Lines', (n) => n.lines ?? ''],
+        ['Rules', (n) => n.ruleCount ?? 0],
+        ['References', (n) => String(outs(n.id).filter((e) => e.relation === 'ships').length)],
+        ['Description', (n) => clean(n.summary, 200)],
+      ]),
+      '## What each skill ships',
+      mocTable(byType('skillResource').sort(sortByLabel), [
+        ['Resource', (n) => link(n.id)],
+        ['Kind', (n) => n.kind ?? ''],
+        ['Lines', (n) => n.lines ?? ''],
+      ]),
+    ];
+    for (const [role, title, note] of ROLE_ORDER) {
+      const list = byType('promptReference').filter((n) => n.promptRole === role).sort(sortByLabel);
+      if (!list.length) continue;
+      out.push(`## ${title} (${list.length})`, note ? `*${note}*` : '');
+      out.push(mocTable(list, [
+        ['Reference', (n) => link(n.id)],
+        ['Lines', (n) => n.lines ?? ''],
+        ['Rules', (n) => n.ruleCount ?? 0],
+        ['Purpose', (n) => clean(n.summary, 120)],
+      ]));
+    }
+    return out.filter(Boolean).join('\n\n');
+  })(),
+  'Rules': (() => {
+    const rules = byType('rule');
+    const ORDER = ['prohibition', 'obligation', 'recommendation'];
+    const owners = new Map();
+    for (const r of rules) {
+      if (!owners.has(r.owner)) owners.set(r.owner, []);
+      owners.get(r.owner).push(r);
+    }
+    const out = [
+      `Every normative statement the extractor found in the skill package: **${rules.length}** rules across ` +
+      `${owners.size} documents. A statement counts as a rule when it carries a modality marker — ` +
+      '`MUST`, `NEVER`, `do not`, `always`, `required`, `should`, `prefer` — outside a fenced code block. ' +
+      'Declarative constraints written without one ("`prompt` is required" does count, "`caseExpression` is a string" does not) are not captured, ' +
+      'so treat this as a floor rather than a complete census.',
+      '## By modality',
+      mocTable(ORDER.map((m) => ({ m, list: rules.filter((r) => r.modality === m) })), [
+        ['Modality', (x) => x.m],
+        ['Count', (x) => x.list.length],
+        ['Markers', (x) => [...new Set(x.list.map((r) => r.marker))].join(', ')],
+      ]),
+      '## Which documents carry the rules',
+      mocTable([...owners].sort((a, b) => b[1].length - a[1].length).slice(0, 30).map(([o, list]) => ({ o, list })), [
+        ['Document', (x) => x.o],
+        ['Rules', (x) => x.list.length],
+        ['Prohibitions', (x) => x.list.filter((r) => r.modality === 'prohibition').length],
+        ['Obligations', (x) => x.list.filter((r) => r.modality === 'obligation').length],
+      ]),
+      '## What the rules govern',
+      mocTable(
+        graph.nodes
+          .filter((n) => ['workflowNodeType', 'artifactType', 'testKind'].includes(n.type))
+          .map((n) => ({ n, c: incs(n.id).filter((e) => e.relation === 'governs').length }))
+          .filter((x) => x.c)
+          .sort((a, b) => b.c - a.c),
+        [
+          ['Governed', (x) => link(x.n.id)],
+          ['Kind', (x) => x.n.type],
+          ['Rules', (x) => x.c],
+        ],
+      ),
+      '## The prohibitions, most-governing first',
+      mocTable(
+        rules
+          .filter((r) => r.modality === 'prohibition')
+          .sort((a, b) => outs(b.id).length - outs(a.id).length)
+          .slice(0, 60),
+        [
+          ['Rule', (r) => link(r.id, clean(r.body, 150))],
+          ['Where', (r) => r.owner ?? ''],
+          ['Governs', (r) => outs(r.id).filter((e) => e.relation === 'governs').map((e) => byId.get(e.target)?.code ?? '').filter(Boolean).join(', ')],
+        ],
+      ),
+    ];
+    return out.join('\n\n');
+  })(),
+  'Node Types': (() => {
+    const types = byType('workflowNodeType').sort((a, b) => (b.instanceCount ?? 0) - (a.instanceCount ?? 0));
+    const unused = types.filter((t) => t.specified && !t.usedHere);
+    const unspecified = types.filter((t) => !t.specified);
+    return [
+      'The workflow node vocabulary, from two independent sources: a `Backend \`type\`` line in a ' +
+      '`workflow-node-prompts/*.md` spec, and the `type` on a node in a sample `.wf`. Where they disagree is the interesting part.',
+      mocTable(types, [
+        ['Node type', (n) => link(n.id)],
+        ['Spec', (n) => (n.specified ? `[[${notePath.get(`prompt:${n.specFile}`) ?? ''}|${n.specFile}]]` : '—')],
+        ['Rules', (n) => n.ruleCount ?? 0],
+        ['In samples', (n) => n.instanceCount ?? 0],
+      ]),
+      `## Specified but never exercised (${unused.length})`,
+      'The skill package documents how to author these; no sample workflow contains one. This is the honest answer to "what can Agent Studio do that these apps do not show".',
+      mocTable(unused, [['Node type', (n) => link(n.id)], ['Spec', (n) => n.specFile ?? ''], ['Rules', (n) => n.ruleCount ?? 0]]),
+      `## Used without a spec (${unspecified.length})`,
+      mocTable(unspecified, [['Node type', (n) => link(n.id)], ['In samples', (n) => n.instanceCount ?? 0]]),
+    ].join('\n\n');
+  })(),
+  'Testing': (() => {
+    const kinds = byType('testKind');
+    return [
+      'Testing is the largest single subsystem of the `aistudio` CLI and has three authoring references of its own, ' +
+      'but no artifact file extension — so each kind is modelled as a node that its reference specifies, its commands operate on, and its artifact type hangs off.',
+      mocTable(kinds, [
+        ['Kind', (n) => link(n.id)],
+        ['Exercises', (n) => outs(n.id).filter((e) => e.relation === 'exercises').map((e) => byId.get(e.target)?.label ?? '').join(', ')],
+        ['Commands', (n) => incs(n.id).filter((e) => e.relation === 'operates_on_test').length],
+        ['Rules', (n) => incs(n.id).filter((e) => e.relation === 'governs').length],
+        ['What it is', (n) => clean(n.summary, 140)],
+      ]),
+      ...kinds.map((k) => {
+        const cmds = incs(k.id)
+          .filter((e) => e.relation === 'operates_on_test')
+          .map((e) => byId.get(e.source))
+          .filter(Boolean)
+          .sort(sortByLabel);
+        if (!cmds.length) return '';
+        return `## ${k.label} (${cmds.length} commands)\n` + mocTable(cmds, [
+          ['Command', (n) => link(n.id)],
+          ['Verb', (n) => n.verb ?? ''],
+          ['Description', (n) => clean(n.summary, 130)],
+        ]);
+      }).filter(Boolean),
+    ].join('\n\n');
+  })(),
   'CLI Commands': (() => {
     const groups = new Map();
     for (const c of byType('cliCommand').sort(sortByLabel)) {
@@ -783,34 +973,54 @@ const maps = {
   })(),
   'Architecture Stack': (() => {
     const ORDER = [
+      [11, 'Skills', 'the entry point — what a coding agent loads first'],
+      [10, 'Playbooks & references', 'the prose each skill routes to, and its section structure'],
+      [9, 'Rules & conventions', 'what that prose actually requires and forbids'],
+      [8, 'Specs & vocabulary', 'artifact types, workflow node types, test kinds, tool types'],
+      [7, 'CLI surface', 'the commands that enforce it'],
       [5, 'Business outcomes', 'the result'],
       [4, 'Agentic applications', 'the product'],
       [3, 'Agent teams', 'supervisor + workflow'],
       [2, 'Agents', 'compose tools'],
       [1, 'Tools', 'used by agents'],
       [0, 'Agent internals', 'workflow steps'],
-      [-1, 'Authoring & governance', 'skills, prompts, CLI, policy'],
+      [-1, 'Findings', 'unwired branches and unresolved references'],
     ];
     // one element per paragraph: the whole list is joined with blank lines, so a
     // multi-line fence has to arrive as a single string
     const diagram = [
       '```mermaid',
       'flowchart TD',
-      '  BO["Business outcomes · the result"] --> AA["Agentic applications · the product"]',
-      '  AA --> AT["Agent teams · supervisor + workflow"]',
-      '  AT --> AG["Agents · compose tools"]',
-      '  AG --> TL["Tools · used by agents"]',
-      '  TL --> AI["Agent internals · workflow steps"]',
-      '  classDef top fill:#f3e8fd,stroke:#a142f4',
+      '  subgraph AUTH["The authoring corpus — what the repo ships"]',
+      '    direction TB',
+      '    SK["Skills · the entry point"] --> PR["Playbooks & references"]',
+      '    PR --> RU["Rules & conventions"]',
+      '    RU --> VO["Specs & vocabulary"]',
+      '    VO --> CL["CLI surface"]',
+      '  end',
+      '  subgraph SAMP["The sample corpus — evidence that the rules work"]',
+      '    direction TB',
+      '    BO["Business outcomes · the result"] --> AA["Agentic applications · the product"]',
+      '    AA --> AT["Agent teams · supervisor + workflow"]',
+      '    AT --> AG["Agents · compose tools"]',
+      '    AG --> TL["Tools · used by agents"]',
+      '    TL --> AI["Agent internals · workflow steps"]',
+      '  end',
+      '  RU -. governs .-> AI',
+      '  VO -. classifies .-> AI',
+      '  classDef auth fill:#f3e8fd,stroke:#a142f4',
       '  classDef mid fill:#e8f0fe,stroke:#4285f4',
       '  classDef low fill:#e6f4ea,stroke:#34a853',
-      '  class BO,AA top',
-      '  class AT,AG mid',
+      '  class SK,PR,RU,VO,CL auth',
+      '  class BO,AA,AT,AG mid',
       '  class TL,AI low',
       '```',
     ].join('\n');
     const out = [
-      'The Oracle AI Agent Studio hierarchy, top down, with every artifact in this repo placed on it.',
+      'Two stacks, not one. The repo\'s product is the skill package: skills route to references, ' +
+      'references state rules, rules govern a vocabulary, and the CLI enforces it. `aiapps/` sits underneath as ' +
+      'a worked example of that contract — the evidence layer, not the subject. Every node carries a `corpus` ' +
+      'property saying which half it is in.',
       diagram,
       'A workflow is placed on **Agent teams** when an app exposes it as an agent or when it',
       'invokes sub-workflows — i.e. it supervises other agents. Every other workflow is an',
@@ -822,11 +1032,17 @@ const maps = {
       if (!list.length) continue;
       const kinds = [...new Set(list.map((x) => x.type))].join(', ');
       out.push(`## ${name}`, `*${note}* — ${list.length} artifacts (${kinds})`);
-      // list the interesting ones rather than 1,679 workflow nodes
+      // list the interesting ones rather than every workflow node
+      // 1,686 workflow nodes and 1,680 rules are both too many to list; show the
+      // load-bearing ones and say so rather than truncating silently
+      const CAPPED = layer === 0 || layer === 9 || layer === 10;
       const show = layer === 0
         ? list.filter((x) => x.issues?.length || x.articulation).sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0)).slice(0, 20)
         : [...list].sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0)).slice(0, 40);
       if (layer === 0) out.push('Only the flagged ones are listed; the rest live under each workflow.');
+      else if (CAPPED && list.length > show.length) {
+        out.push(`Top ${show.length} by PageRank of ${list.length}; the rest are in [[Maps/Rules]] and [[Maps/Skills and Prompts]].`);
+      }
       if (show.length) {
         out.push(mocTable(show, [
           ['Artifact', (x) => link(x.id)],
@@ -841,7 +1057,10 @@ const maps = {
     return out.join('\n\n');
   })(),
   'Hubs and Bottlenecks': (() => {
-    const ARTIFACTS = new Set(['app', 'workflow', 'workflowNode', 'businessObject', 'boFunction', 'tool', 'deeplink', 'skill', 'promptReference', 'cliCommand']);
+    const ARTIFACTS = new Set(['app', 'workflow', 'workflowNode', 'businessObject', 'boFunction', 'tool', 'deeplink', 'skill', 'promptReference', 'cliCommand', 'rule']);
+    // workflowNodeType and testKind are deliberately absent: they are vocabulary,
+    // and everything links to them by construction — the same reason families and
+    // artifact types are excluded from this table
     const top = (key, count, filter = () => true) =>
       graph.nodes.filter(filter).sort((a, b) => (b[key] ?? 0) - (a[key] ?? 0)).slice(0, count);
     const NAME = [['Node', (x) => link(x.id)], ['Kind', (x) => x.type], ['Where', (x) => x.workflow ?? x.family ?? '—']];
@@ -912,9 +1131,10 @@ const home = `${frontmatter({ title: 'Fusion AI Studio Knowledge Graph', type: '
 
 # Fusion AI Studio Knowledge Graph
 
-A navigable graph of the [oracle/fusion-ai-studio](https://github.com/oracle/fusion-ai-studio) release-26C corpus:
-every agentic app, workflow, workflow node, business object, tool, skill, prompt reference and CLI command,
-plus the control-flow and data-flow edges that connect them.
+A navigable graph of the [oracle/fusion-ai-studio](https://github.com/oracle/fusion-ai-studio) release-26C corpus,
+organised the way the repo actually is: the **skill package** — skills, prompt references, the rules they state,
+the vocabulary those rules govern, and the CLI that enforces it — with Oracle's sample apps, workflows and
+business objects underneath as the worked example.
 
 **${graph.nodes.length} notes · ${graph.edges.length} relationships**
 
@@ -927,11 +1147,14 @@ plus the control-flow and data-flow edges that connect them.
 | [[Maps/Data Flow]] | Every BO-backed fetch: workflow → node → function → business object |
 | [[Maps/Business Objects]] | Data sources and the REST resources behind them |
 | [[Maps/CLI Commands]] | All ${counts.cliCommand ?? 0} \`aistudio\` commands, grouped by purpose |
-| [[Maps/Skills and Prompts]] | Skills and the prompt references they load |
+| [[Maps/Skills and Prompts]] | The 3 skills and their ${counts.promptReference ?? 0} references, grouped by what each is for |
+| [[Maps/Rules]] | All ${counts.rule ?? 0} extracted rules, by modality, by document and by what they govern |
+| [[Maps/Node Types]] | The ${counts.workflowNodeType ?? 0} workflow node types: which have a spec, which the samples use |
+| [[Maps/Testing]] | Test kinds, the references that specify them, the commands that run them |
 | [[Maps/Tools and Deeplinks]] | Tools and their backing deeplinks |
 | [[Maps/Taxonomy]] | Families, products, model configurations, artifact types |
 | [[Maps/Tool Types]] | The 9 supported tool types, which are used here and which are not |
-| [[Maps/Architecture Stack]] | The Agent Studio hierarchy: outcomes → apps → teams → agents → tools |
+| [[Maps/Architecture Stack]] | Both stacks: skills → references → rules → vocabulary → CLI, over outcomes → apps → agents → tools |
 | [[Maps/Hubs and Bottlenecks]] | PageRank hubs, bridges, cut vertices, blast radius |
 | [[Maps/Findings]] | Unwired branches, unresolved references, platform-seeded artifacts |
 
@@ -943,6 +1166,10 @@ plus the control-flow and data-flow edges that connect them.
   \`scrubString\` lands on the exact node.
 - **By facet** — search \`tag:#node/LLM\`, \`tag:#family/HCM\`, \`tag:#verb/mutate\`,
   \`tag:#finding/cut-vertex\`, \`tag:#community/C-5\`, \`tag:#layer/agent-teams\`.
+- **Across the skill package** — \`tag:#rule/prohibition\` for everything the skills forbid,
+  \`tag:#prompt/node-spec\` for the node specs, \`tag:#corpus/authoring\` vs \`tag:#corpus/sample\`
+  to separate the contract from the worked example, \`tag:#spec/unused-in-samples\` for
+  capabilities documented but never demonstrated.
 - **By metric** — sort on the \`pagerank\`, \`bridgeScore\` or \`blastRadius\` properties, or
   Dataview: \`TABLE pagerank, blastRadius FROM #type/workflow SORT pagerank DESC\`.
 - **Structurally** — open the graph view (\`Ctrl/Cmd-G\`) and filter, e.g. \`path:Workflows\`.

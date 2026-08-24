@@ -58,6 +58,10 @@ const KEEP = [
   'degree', 'inDegree', 'outDegree',
   // Agent Studio stack position
   'layer', 'layerName', 'stackRole', 'appExposed',
+  // the authoring corpus
+  'corpusRole', 'corpusHalf', 'promptRole', 'modality', 'marker', 'body', 'owner',
+  'section', 'parent', 'level', 'ruleCount', 'specified', 'specFile', 'instanceCount',
+  'kind', 'skill',
   // supported-tool-type classification
   'toolTypeKey', 'toolTypeName', 'toolTypeSource', 'supportedSince', 'artifactCount', 'usedHere',
   // Oracle console section, provenance, and .agent specifics
@@ -67,6 +71,9 @@ const KEEP = [
 const nodes = graph.nodes.map((n) => {
   const o = {};
   for (const k of KEEP) if (n[k] !== undefined && n[k] !== null && n[k] !== '') o[k] = n[k];
+  // a rule's summary is a truncated copy of its body; shipping both doubles the
+  // single largest node type in the payload for nothing
+  if (n.type === 'rule') delete o.summary;
   // renamed for brevity in the payload; the app reads these names
   if (n.promptExcerpt) o.prompt = n.promptExcerpt;
   if (n.caseExpression) o.expr = n.caseExpression;
@@ -94,6 +101,8 @@ const payload = {
   metrics: graph._meta?.metrics ?? {},
   layers: graph._meta?.layers ?? {},
   toolTypes: graph._meta?.toolTypes ?? {},
+  authoring: graph._meta?.authoring ?? {},
+  corpusRoles: graph._meta?.corpusRoles ?? {},
   studioSections: graph._meta?.studioSections ?? {},
   nodes,
   edges,
@@ -114,10 +123,17 @@ if (argv.includes('--bundle')) {
   const js = fs.readFileSync(path.join(APP, 'app.js'), 'utf8');
   // `</script>` inside a string literal would close the inlined tag early
   const safe = (s) => s.replace(/<\/script>/gi, '<\\/script>');
-  const bundled = html
-    .replace('<link rel="stylesheet" href="app.css">', `<style>\n${css}\n</style>`)
-    .replace('<script src="data.js"></script>', `<script>\n${safe(dataJs)}\n</script>`)
-    .replace('<script src="app.js"></script>', `<script>\n${safe(js)}\n</script>`);
+  // The replacement MUST be a function. With a string, `$\``, `$'` and `$&` are
+  // substitution patterns, not literals — and the corpus contains them for real
+  // (a rule stating that workflow codes match `^[A-Z0-9_]+$`, quoted in
+  // backticks, is a `$\`` the moment it lands in data.js). That silently spliced
+  // the whole document back into itself ten times over.
+  const inline = (tag, body) => (h) => h.replace(tag, () => body);
+  const bundled = [
+    inline('<link rel="stylesheet" href="app.css">', `<style>\n${css}\n</style>`),
+    inline('<script src="data.js"></script>', `<script>\n${safe(dataJs)}\n</script>`),
+    inline('<script src="app.js"></script>', `<script>\n${safe(js)}\n</script>`),
+  ].reduce((h, f) => f(h), html);
   const out = path.join(APP, 'agent-stack-explorer.html');
   fs.writeFileSync(out, bundled);
   console.log(`[app] bundle   ${out}  (${kb(Buffer.byteLength(bundled))}, self-contained)`);
