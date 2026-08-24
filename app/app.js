@@ -1,4 +1,4 @@
-/* Fusion Agent Stack Explorer — knowledge-graph explorer for the Oracle AI Studio corpus.
+/* Fusion AI Studio Explorer — knowledge-graph explorer for the Oracle AI Studio corpus.
  *
  * Reads window.FUSION_GRAPH (tools/build-search-app.mjs). Metrics — pagerank,
  * betweenness, bridgeScore, community, blastRadius, clustering, articulation —
@@ -1806,7 +1806,7 @@ function exportCsv() {
     esc(!!n.articulation), esc((n.issues ?? []).join('; ')), esc(n.source_file),
   ].join(','))].join('\n');
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-  const a = el('a', { href: url, download: 'fusion-agent-stack-nodes.csv' });
+  const a = el('a', { href: url, download: 'fusion-ai-studio-nodes.csv' });
   document.body.append(a);
   a.click();
   a.remove();

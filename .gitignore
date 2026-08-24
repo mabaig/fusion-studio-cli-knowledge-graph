@@ -10,7 +10,7 @@ vault/
 docs/
 data/
 app/data.js
-app/agent-stack-explorer.html
+app/fusion-ai-studio-explorer.html
 
 # Your own exports: ingested but never committed
 local/*

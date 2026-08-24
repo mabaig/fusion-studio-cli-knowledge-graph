@@ -134,7 +134,7 @@ if (argv.includes('--bundle')) {
     inline('<script src="data.js"></script>', `<script>\n${safe(dataJs)}\n</script>`),
     inline('<script src="app.js"></script>', `<script>\n${safe(js)}\n</script>`),
   ].reduce((h, f) => f(h), html);
-  const out = path.join(APP, 'agent-stack-explorer.html');
+  const out = path.join(APP, 'fusion-ai-studio-explorer.html');
   fs.writeFileSync(out, bundled);
   console.log(`[app] bundle   ${out}  (${kb(Buffer.byteLength(bundled))}, self-contained)`);
 }

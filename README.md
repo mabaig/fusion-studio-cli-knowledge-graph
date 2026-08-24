@@ -2,7 +2,7 @@
 
 A queryable, navigable, visual map of the [oracle/fusion-ai-studio](https://github.com/oracle/fusion-ai-studio)
 `release-26C` corpus — built with [Graphify](https://github.com/safishamsi/graphify) and
-[Obsidian](https://obsidian.md), plus **Fusion Agent Stack Explorer**, a purpose-built explorer.
+[Obsidian](https://obsidian.md), plus **Fusion AI Studio Explorer**, a purpose-built explorer.
 
 What that repo actually ships is a **skill package**: three skills, 62 prompt references,
 1,676 rules those references state, the vocabulary those rules govern, and a 290-command CLI
@@ -24,8 +24,8 @@ the workspace are read-only inputs; nothing outside this folder is written to.
 
 | Artifact | Open with | What it's for |
 | --- | --- | --- |
-| `app/index.html` | any browser | **Fusion Agent Stack Explorer** — focus any artifact, walk its neighbourhood in six layouts, read its centrality signals; plus a Data Lab with a sortable table, CSV export, path finder and impact analysis |
-| `app/agent-stack-explorer.html` | any browser | the same app as one self-contained file, for sharing |
+| `app/index.html` | any browser | **Fusion AI Studio Explorer** — focus any artifact, walk its neighbourhood in six layouts, read its centrality signals; plus a Data Lab with a sortable table, CSV export, path finder and impact analysis |
+| `app/fusion-ai-studio-explorer.html` | any browser | the same app as one self-contained file, for sharing |
 | `vault/` | Obsidian → *Open folder as vault* | 4,848 linked notes — one per rule, section, spec, workflow node and artifact — with Mermaid flow diagrams, metric properties and Obsidian's native graph view |
 | `graph/METRICS.md` | editor | hubs, bridges, cut vertices and blast radius, ranked |
 | `graph/fusion-graph.json` | anything | the canonical graph — 5,076 nodes, 14,026 edges |
@@ -378,7 +378,7 @@ edge. See `vault/Maps/Findings.md`, or filter the Data Lab to *has findings*.
 
 ---
 
-## Fusion Agent Stack Explorer
+## Fusion AI Studio Explorer
 
 Open `app/index.html`. `⌘K` searches everything — names, codes, prompts, JS source.
 
@@ -469,7 +469,7 @@ fusion-knowledge-graph/
 ├── graph/METRICS.md              ranked hubs, bridges, cut vertices, blast radius
 ├── graphify-out/                 graphify's clustered view, visualisations, report
 ├── vault/                        the Obsidian vault
-├── app/                          Fusion Agent Stack Explorer (index.html + app.js + app.css + data.js)
+├── app/                          Fusion AI Studio Explorer (index.html + app.js + app.css + data.js)
 ├── data/cli-help.txt             captured `aistudio --help`
 ├── local/                        drop your own exports here (gitignored)
 ├── .source/fusion-ai-studio/     upstream tree exported by --sync (gitignored)
@@ -522,7 +522,7 @@ upstream releases without anyone running the pipeline by hand. The derived graph
 committed.
 
 ```bash
-gh repo create fusion-agent-stack-explorer --public --source . --push
+gh repo create fusion-studio-cli-knowledge-graph --public --source . --push
 # then: Settings -> Pages -> Source = "GitHub Actions"
 ```
 
@@ -540,7 +540,7 @@ Your URL will be `https://<user>.github.io/<repo>/`. Both options give the same 
 
 ### Option C — hand someone a file
 
-`app/agent-stack-explorer.html` is the whole thing in one self-contained 4.3 MB file. Email
+`app/fusion-ai-studio-explorer.html` is the whole thing in one self-contained 7.2 MB file. Email
 it, drop it in Slack, open it from a USB stick — it works offline with no server.
 
 ### What gets published, and what doesn't

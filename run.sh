@@ -131,13 +131,13 @@ fi
 step "Building the Obsidian vault"
 node tools/build-obsidian-vault.mjs
 
-step "Building Fusion Agent Stack Explorer"
+step "Building Fusion AI Studio Explorer"
 node tools/build-search-app.mjs --bundle --site
 
 step "Done"
 cat <<EOF
 Explore:
-  Fusion Agent Stack Explorer  open $KG_ROOT/app/index.html
+  Fusion AI Studio Explorer  open $KG_ROOT/app/index.html
   Obsidian      Obsidian -> Open folder as vault -> $KG_ROOT/vault
   Metrics       $KG_ROOT/graph/METRICS.md
   Graphify viz  open $KG_ROOT/graphify-out/graph.html
