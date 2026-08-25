@@ -1,5 +1,12 @@
 # Notices and attribution
 
+## Independence
+
+This is an independent project. It is **not affiliated with, sponsored by, or
+endorsed by Oracle**. "Oracle", "Oracle Fusion" and "Oracle Fusion AI Agent
+Studio" are trademarks of Oracle and/or its affiliates, used here only to
+identify the corpus this project describes.
+
 ## Derived data
 
 This project reads the public repository

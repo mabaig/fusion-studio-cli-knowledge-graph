@@ -40,6 +40,9 @@ const AUTHOR = {
 const ATTRIBUTION = {
   text: 'Data derived from oracle/fusion-ai-studio · UPL-1.0',
   href: 'https://github.com/oracle/fusion-ai-studio',
+  // The app carries Oracle's product name in its subtitle and is published by an
+  // Oracle partner, so say plainly that it is neither official nor endorsed.
+  note: 'Independent project — not affiliated with or endorsed by Oracle.',
 };
 
 // ---------------------------------------------------------------- project nodes

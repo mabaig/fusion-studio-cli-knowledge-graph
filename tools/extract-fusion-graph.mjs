@@ -1199,15 +1199,28 @@ for (const file of nodeSpecFiles) {
   }
 }
 
+/**
+ * Types the Workflow Builder inserts as scaffolding rather than as a capability.
+ * ADD is the stub dropped on an unfilled branch - every instance is named
+ * "Add (False Branch)" / "Add (True Branch)", carries no inputs and passes
+ * straight through to the next node. It has no authoring spec because there is
+ * nothing to author, so reporting it as a documentation gap is wrong.
+ */
+const PLACEHOLDER_NODE_TYPES = new Set(['ADD']);
+
 // every type the sample corpus actually instantiates, spec or no spec
 for (const n of [...nodes.values()]) {
   if (n.type !== 'workflowNode' || !n.nodeType) continue;
+  const placeholder = PLACEHOLDER_NODE_TYPES.has(n.nodeType);
   const id = addNode(ID.nodeType(n.nodeType), {
     label: `${n.nodeType} node`,
     type: 'workflowNodeType',
     code: n.nodeType,
-    summary: `Workflow node type observed in the sample corpus with no bundled spec.`,
+    summary: placeholder
+      ? 'Builder scaffolding: the empty stub dropped on an unfilled branch, not an authoring capability.'
+      : 'Workflow node type observed in the sample corpus with no bundled spec.',
     specified: false,
+    placeholder,
     file_type: 'concept',
   });
   addEdge(n.id, id, 'is_node_type', {});
@@ -1496,12 +1509,14 @@ for (const file of skillFiles) {
   const text = fs.readFileSync(file, 'utf8');
   const name = frontmatter(text).name || path.basename(path.dirname(file));
   const r = indexAuthoringDoc(ID.skill(name), `skill/${name}`, file, text);
+  nodes.get(ID.skill(name)).ruleCount = r.rules;
   authoringIndex.sections += r.sections;
   authoringIndex.rules += r.rules;
 }
 for (const file of promptFiles) {
   const key = promptKey.get(file);
   const r = indexAuthoringDoc(ID.prompt(key), `prompt/${key}`, file, fs.readFileSync(file, 'utf8'));
+  nodes.get(ID.prompt(key)).ruleCount = r.rules;
   authoringIndex.sections += r.sections;
   authoringIndex.rules += r.rules;
 }
@@ -1530,11 +1545,17 @@ for (const n of nodes.values()) {
   n.instanceCount = edges.filter((e) => e.target === n.id && e.relation === 'is_node_type').length;
   n.ruleCount = edges.filter((e) => e.target === n.id && e.relation === 'governs').length;
   n.usedHere = n.instanceCount > 0;
-  if (!n.specified) n.summary = `Workflow node type used ${n.instanceCount}× in the sample corpus with no bundled spec.`;
+  if (n.placeholder) n.summary = `Builder scaffolding, used ${n.instanceCount}× in the sample corpus. Not an authoring capability, so it has no spec by design.`;
+  else if (!n.specified) n.summary = `Workflow node type used ${n.instanceCount}× in the sample corpus with no bundled spec.`;
   else if (!n.usedHere) n.summary = `${n.summary} Supported and specified, but not exercised by any sample app.`;
 }
+// A section states its rules directly, so an edge count is right for it. A skill
+// or reference does not: almost every rule sits under some heading, so the
+// `states` edge leaves the section rather than the document, and counting edges
+// reported 0 rules for all three skills when they state 25, 43 and 40.
+// indexAuthoringDoc returns the real per-document total; use that.
 for (const n of nodes.values()) {
-  if (n.type === 'promptReference' || n.type === 'skill' || n.type === 'docSection') {
+  if (n.type === 'docSection') {
     n.ruleCount = edges.filter((e) => e.source === n.id && e.relation === 'states').length;
   }
 }

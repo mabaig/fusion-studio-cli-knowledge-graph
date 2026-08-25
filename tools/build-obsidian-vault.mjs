@@ -462,7 +462,9 @@ function tagsFor(n) {
   if (n.modality) t.push(`rule/${n.modality}`);
   if (n.promptRole) t.push(`prompt/${n.promptRole}`);
   if (n.corpusRole) t.push(`corpus/${n.corpusRole}`);
-  if (n.type === 'workflowNodeType') t.push(n.specified ? 'spec/specified' : 'spec/undocumented');
+  if (n.type === 'workflowNodeType') {
+    t.push(n.placeholder ? 'spec/builder-scaffolding' : n.specified ? 'spec/specified' : 'spec/undocumented');
+  }
   if (n.type === 'workflowNodeType' && !n.usedHere) t.push('spec/unused-in-samples');
   if (n.issues?.length) t.push('finding/has-issue');
   if (n.articulation) t.push('finding/cut-vertex');
@@ -546,6 +548,10 @@ function noteFor(n) {
     if (n.specified && !n.usedHere) {
       parts.push(
         `> [!info] Specified, never exercised here\n> The skill package ships an authoring spec for this node type, but no sample workflow uses one.`,
+      );
+    } else if (n.placeholder) {
+      parts.push(
+        `> [!note] Builder scaffolding, not a capability\n> The stub the Workflow Builder drops on an unfilled branch — no inputs, passes straight through. It has no authoring spec because there is nothing to author.`,
       );
     } else if (!n.specified) {
       parts.push(
@@ -742,7 +748,9 @@ const maps = {
         ['Skill', (n) => link(n.id)],
         ['Lines', (n) => n.lines ?? ''],
         ['Rules', (n) => n.ruleCount ?? 0],
-        ['References', (n) => String(outs(n.id).filter((e) => e.relation === 'ships').length)],
+        // 'ships' also carries the CLI script and agent configs; the column says
+        // references, so count only those
+        ['References', (n) => String(outs(n.id).filter((e) => e.relation === 'ships' && e.context === 'reference').length)],
         ['Description', (n) => clean(n.summary, 200)],
       ]),
       '## What each skill ships',
@@ -823,7 +831,8 @@ const maps = {
   'Node Types': (() => {
     const types = byType('workflowNodeType').sort((a, b) => (b.instanceCount ?? 0) - (a.instanceCount ?? 0));
     const unused = types.filter((t) => t.specified && !t.usedHere);
-    const unspecified = types.filter((t) => !t.specified);
+    const unspecified = types.filter((t) => !t.specified && !t.placeholder);
+    const scaffolding = types.filter((t) => t.placeholder);
     return [
       'The workflow node vocabulary, from two independent sources: a `Backend \`type\`` line in a ' +
       '`workflow-node-prompts/*.md` spec, and the `type` on a node in a sample `.wf`. Where they disagree is the interesting part.',
@@ -837,7 +846,12 @@ const maps = {
       'The skill package documents how to author these; no sample workflow contains one. This is the honest answer to "what can Agent Studio do that these apps do not show".',
       mocTable(unused, [['Node type', (n) => link(n.id)], ['Spec', (n) => n.specFile ?? ''], ['Rules', (n) => n.ruleCount ?? 0]]),
       `## Used without a spec (${unspecified.length})`,
-      mocTable(unspecified, [['Node type', (n) => link(n.id)], ['In samples', (n) => n.instanceCount ?? 0]]),
+      unspecified.length
+        ? mocTable(unspecified, [['Node type', (n) => link(n.id)], ['In samples', (n) => n.instanceCount ?? 0]])
+        : 'None. Every type the samples use has a bundled spec.',
+      `## Builder scaffolding (${scaffolding.length})`,
+      'Inserted by the Workflow Builder rather than authored. No inputs, passes straight through, and no spec by design — these are not documentation gaps.',
+      mocTable(scaffolding, [['Node type', (n) => link(n.id)], ['In samples', (n) => n.instanceCount ?? 0]]),
     ].join('\n\n');
   })(),
   'Testing': (() => {

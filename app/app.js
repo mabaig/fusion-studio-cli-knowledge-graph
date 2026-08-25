@@ -1155,7 +1155,7 @@ function browseGroups() {
   }
   groups.push({ name: 'Workflow node types', note: 'vocabulary', color: layerColor(8),
     items: of((x) => x.type === 'workflowNodeType'),
-    sub: (x) => `${x.specified ? 'specified' : 'no spec'} · ${x.instanceCount ?? 0} in samples` });
+    sub: (x) => `${x.placeholder ? 'builder scaffolding' : x.specified ? 'specified' : 'no spec'} · ${x.instanceCount ?? 0} in samples` });
   groups.push({ name: 'Test kinds', note: 'vocabulary', color: layerColor(8),
     items: of((x) => x.type === 'testKind'), sub: (x) => x.summary ?? '' });
   groups.push({ name: 'Artifact types', note: 'vocabulary', color: layerColor(8),
@@ -1419,7 +1419,8 @@ function renderRight() {
       n.promptRole ? chip(n.promptRole) : null,
       n.ruleCount ? chip(`${n.ruleCount} rules`) : null,
       n.type === 'workflowNodeType' && n.specified && !n.usedHere ? chip('specified, unused here', 'hot') : null,
-      n.type === 'workflowNodeType' && !n.specified ? chip('no spec', 'hot') : null,
+      n.type === 'workflowNodeType' && n.placeholder ? chip('builder scaffolding') : null,
+      n.type === 'workflowNodeType' && !n.specified && !n.placeholder ? chip('no spec', 'hot') : null,
       n.origin === 'local' ? chip('your environment', 'hot') : null));
   }
 
@@ -1591,6 +1592,8 @@ function renderCredit() {
       : el('span', { text: a.name }),
     at?.text ? ' · ' : null,
     at?.text ? el('a', { class: 'nl', href: at.href, target: '_blank', rel: 'noreferrer' }, at.text) : null,
+    at?.note ? ' · ' : null,
+    at?.note ? el('span', { text: at.note }) : null,
   ].filter(Boolean));
 }
 
