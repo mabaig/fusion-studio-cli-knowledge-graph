@@ -103,6 +103,7 @@
 html, body {
   margin: 0;
   height: 100%;
+  height: 100dvh;
   background: var(--bg);
   color: var(--fg);
   font: 13.5px/1.55 var(--sans);
@@ -309,7 +310,7 @@ body.right-collapsed .side.right .rail-label {
 body.left-collapsed #toggle-left, body.right-collapsed #toggle-right { right: 4px; left: 4px; }
 
 .stage { position: relative; min-width: 0; min-height: 320px; background: var(--bg); }
-canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
 canvas:active { cursor: grabbing; }
 
 /* ------------------------------------------------------------- cards */
@@ -695,6 +696,12 @@ details.grp summary { cursor: pointer; padding: 3px 0; font-size: 12.5px; }
 
 .empty { padding: 20px 4px; color: var(--fg-dim); font-size: 12.5px; }
 
+/* Phone-only furniture, laid out by the breakpoint at the foot of this file. */
+.mbar { display: none; }
+.drawer-scrim { display: none; }
+.ov-toggle { display: none; }
+.touch-only { display: none; }
+
 @media (max-width: 1280px) {
   .graph-main { grid-template-columns: 268px minmax(0, 1fr) 300px; }
 }
@@ -702,4 +709,199 @@ details.grp summary { cursor: pointer; padding: 3px 0; font-size: 12.5px; }
   .graph-main { grid-template-columns: minmax(0, 1fr) 300px; }
   .side.left { display: none; }
   .tools { grid-template-columns: 1fr; }
+}
+
+/* ------------------------------------------------------------- phone
+
+   Below this width the three-column grid cannot hold: the canvas would be a
+   sliver between two panels. The stage takes the full width and both panels
+   become drawers that slide over it.
+
+   `!important` on the grid tracks is deliberate — setPanelWidths() in app.js
+   writes grid-template-columns as an inline style, and an inline declaration
+   outranks a plain rule here however late it appears. (app.js also skips that
+   write on a phone; this is the belt to its braces.) */
+@media (max-width: 860px) {
+  .mbar { display: flex; }
+  .ov-toggle { display: block; }
+  .touch-only { display: inline-block; }
+
+  /* --------------------------------------------------- chrome */
+
+  .tabstrip { flex-wrap: wrap; }
+  .tabstrip button { padding: 11px 14px; }
+  .tabstrip .build { display: none; }
+  .tabstrip .theme { margin-right: 8px; }
+  .tabstrip .theme button { padding: 5px 9px; }
+
+  header { padding: 9px 12px; gap: 8px 10px; row-gap: 8px; }
+  .brand { flex: 1 1 100%; flex-wrap: wrap; gap: 4px 9px; }
+  .brand h1 { font-size: 17px; }
+  .counts {
+    flex: 1 1 100%;
+    gap: 6px 14px;
+    max-height: 46px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+  .counts .c { font-size: 11.5px; }
+  /* Basis rather than a percentage, so the three controls sit on one line on a
+     small tablet and fold to two rows on a phone without a second breakpoint. */
+  .controls { flex: 1 1 100%; margin-left: 0; gap: 6px; }
+  .controls .sel { flex: 1 1 160px; min-width: 0; max-width: 340px; }
+  .controls .sel select { flex: 1 1 auto; min-width: 0; }
+  button.search-open { flex: 1 1 220px; min-width: 0; }
+  button.search-open kbd { display: none; }
+
+  /* 16px keeps iOS Safari from zooming the whole page in on focus. */
+  .sel select,
+  .browse-filter,
+  .ov-controls select,
+  .lab-bar input[type="text"],
+  .tool input[type="text"] { font-size: 16px; }
+
+  /* --------------------------------------------------- drawers */
+
+  .mbar {
+    flex: 0 0 auto;
+    gap: 8px;
+    padding: 7px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .mbar button {
+    flex: 1 1 0;
+    font-family: var(--mono); font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 9px 10px;
+    color: var(--fg-mid);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    cursor: pointer;
+  }
+  .mbar button[aria-expanded="true"] {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  .graph-main { grid-template-columns: minmax(0, 1fr) !important; }
+
+  .side {
+    position: fixed;
+    top: 0; bottom: 0;
+    z-index: 40;
+    width: min(88vw, 380px);
+    border: 0;
+    box-shadow: 0 0 40px rgba(0, 0, 0, 0.5);
+    transition: transform 0.2s ease;
+  }
+  /* The 1040px rule above drops the left panel entirely; as a drawer it is the
+     only way to reach Browse on a phone, so put it back. */
+  .side.left { display: block; left: 0; transform: translateX(-101%); border-right: 1px solid var(--border); }
+  .side.right { right: 0; transform: translateX(101%); border-left: 1px solid var(--border); }
+  body.m-left-open .side.left,
+  body.m-right-open .side.right { transform: none; }
+
+  /* Collapsed-rail state is a desktop idea; a drawer is either open or gone. */
+  body.left-collapsed .side.left .side-body,
+  body.right-collapsed .side.right .side-body { display: block; }
+  .rail-label { display: none !important; }
+
+  .drawer-scrim {
+    position: fixed; inset: 0;
+    z-index: 35;
+    background: rgba(0, 0, 0, 0.5);
+  }
+  body.m-left-open .drawer-scrim,
+  body.m-right-open .drawer-scrim { display: block; }
+
+  /* The collapse chevrons close the drawer instead (app.js rebinds them). */
+  .panel-toggle { width: 30px; height: 30px; font-size: 17px; top: 6px; }
+  .side.left .panel-toggle { right: 8px; left: auto; }
+  .side.right .panel-toggle { left: 8px; right: auto; }
+  .side.left .side-body { padding: 12px; }
+  .rtabs { padding-left: 44px; }
+  .rtabs button { font-size: 9.5px; padding: 12px 2px; }
+  .rbody { padding: 12px; }
+
+  /* --------------------------------------------------- stage */
+
+  .stage { min-height: 220px; }
+  .stage-actions { top: 8px; right: 8px; gap: 5px; }
+  .stage-actions button { padding: 7px 10px; }
+  #zoom-in, #zoom-out { font-size: 13px; padding: 5px 11px; line-height: 1; }
+
+  .ov-controls {
+    left: 8px; right: 8px; bottom: 8px;
+    width: auto;
+    padding: 8px 10px;
+  }
+  .ov-toggle {
+    width: 100%;
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.12em;
+    text-transform: uppercase;
+    text-align: left;
+    padding: 3px 0;
+    color: var(--fg-mid);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+  }
+  .ov-toggle::after { content: ' \25BE'; color: var(--fg-dim); }
+  .ov-controls.collapsed .ov-toggle::after { content: ' \25B8'; }
+  .ov-controls.collapsed > *:not(.ov-toggle) { display: none; }
+  .ov-controls .hint { display: none; }
+  .ov-controls input[type="range"] { margin-bottom: 12px; height: 22px; }
+  .ov-controls select { padding: 8px 7px; }
+  .ov-empty { max-width: min(88vw, 340px); padding: 14px 16px; }
+  .tip { max-width: min(78vw, 260px); }
+
+  /* --------------------------------------------------- legend + status */
+
+  .legend { padding: 6px 10px; gap: 6px 8px; max-height: 76px; }
+  .legend .title { font-size: 13px; }
+  .status {
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    padding: 5px 10px;
+    font-size: 9.5px;
+    line-height: 1.5;
+  }
+  .status .right { margin-left: 0; }
+
+  /* --------------------------------------------------- palette */
+
+  .palette-back { padding-top: 5vh; }
+  .palette { width: 94vw; }
+  .palette input { font-size: 16px; padding: 13px 15px; }
+  .palette .hits { max-height: 62vh; }
+  .palette .hit { padding: 11px 15px; }
+  .palette .foot { display: none; }
+
+  /* --------------------------------------------------- data lab */
+
+  .lab-bar { padding: 8px 10px; gap: 7px; }
+  .lab-bar input[type="text"] { flex: 1 1 100%; }
+  .lab-bar .sel { flex: 1 1 44%; min-width: 0; }
+  .lab-bar .sel select { min-width: 0; }
+  /* Fourteen columns will not fold. Let the grid scroll sideways in its own box
+     rather than squeezing every column to unreadable — the floor matters once a
+     filter narrows the content enough for the table to shrink to the screen. */
+  .lab-scroll { -webkit-overflow-scrolling: touch; }
+  table.grid { min-width: 1080px; }
+  /* Half the screen is too much to spend on the two query tools when the grid
+     above them is the reason to be here. */
+  .tools { grid-template-columns: 1fr; padding: 10px; gap: 10px; max-height: 38vh; }
+  .tool { padding: 11px; }
+}
+
+/* A phone held sideways has ~350px of height to spend: drop the legend and
+   tighten the header so the canvas keeps most of it. */
+@media (max-width: 960px) and (max-height: 520px) {
+  .legend { display: none; }
+  .counts { display: none; }
+  header { padding: 6px 12px; }
+  .brand h1 { font-size: 15px; }
 }

@@ -674,14 +674,67 @@ function showTip(node, cx, cy) {
 }
 const hideTip = () => { tip.hidden = true; };
 
+/** Zoom about a point in canvas-local coordinates, clamped to the usable range. */
+function zoomAt(mx, my, target) {
+  const ns = Math.max(0.12, Math.min(5, target));
+  sim.tx = mx - ((mx - sim.tx) * ns) / sim.scale;
+  sim.ty = my - ((my - sim.ty) * ns) / sim.scale;
+  sim.scale = ns;
+  paint();
+}
+
+/** Step the zoom about the centre of the stage — what the touch +/- buttons do. */
+function zoomStep(factor) {
+  zoomAt(cv.clientWidth / 2, cv.clientHeight / 2, sim.scale * factor);
+}
+
 (() => {
+  // Live pointers are kept in a map rather than behind a single drag flag,
+  // because a touchscreen sends two of them at once and a pinch has to be told
+  // apart from a pan.
+  const pts = new Map();
   let dragging = false, lx = 0, ly = 0, moved = false;
+  let pinchDist = 0, pinchMid = null;
+
+  /** Spread and midpoint of the first two live pointers, in client coords. */
+  const gesture = () => {
+    const [a, b] = [...pts.values()];
+    return { d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  };
+
   cv.addEventListener('pointerdown', (e) => {
-    dragging = true; moved = false; lx = e.clientX; ly = e.clientY;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
     cv.setPointerCapture(e.pointerId);
+    if (pts.size >= 2) {
+      const g = gesture();
+      dragging = false;
+      moved = true;                       // a pinch must never land as a tap
+      pinchDist = g.d; pinchMid = { x: g.mx, y: g.my };
+      hideTip();
+      return;
+    }
+    dragging = true; moved = false; lx = e.clientX; ly = e.clientY;
   });
+
   cv.addEventListener('pointermove', (e) => {
+    if (pts.has(e.pointerId)) pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pts.size >= 2) {
+      const g = gesture();
+      const rect = cv.getBoundingClientRect();
+      // Two fingers do both jobs at once: the spread zooms, the midpoint pans.
+      if (pinchMid) { sim.tx += g.mx - pinchMid.x; sim.ty += g.my - pinchMid.y; }
+      pinchMid = { x: g.mx, y: g.my };
+      if (pinchDist > 0 && g.d > 0) zoomAt(g.mx - rect.left, g.my - rect.top, (sim.scale * g.d) / pinchDist);
+      else paint();
+      pinchDist = g.d;
+      return;
+    }
+
     if (!dragging) {
+      // Touch and pen report a hover the instant they land. A tooltip chasing a
+      // finger is noise, and it outstays the finger that summoned it.
+      if (e.pointerType !== 'mouse') return;
       const rect = cv.getBoundingClientRect();
       const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
       const node = hit ? byId.get(hit.id) : null;
@@ -696,24 +749,42 @@ const hideTip = () => { tip.hidden = true; };
     paint();
   });
   cv.addEventListener('pointerleave', hideTip);
-  cv.addEventListener('pointerup', (e) => {
+
+  const release = (e) => {
+    const wasDragging = dragging;
+    pts.delete(e.pointerId);
+    if (pts.size < 2) { pinchDist = 0; pinchMid = null; }
+    if (pts.size === 1) {
+      // One finger lifted out of a pinch: resume panning from where the
+      // survivor is, rather than jumping by however far it sits from the last
+      // single-pointer position.
+      const [p] = [...pts.values()];
+      dragging = true; moved = true; lx = p.x; ly = p.y;
+      return;
+    }
     dragging = false;
-    if (moved) return;
+    if (!wasDragging || moved || e.type !== 'pointerup') return;
     const rect = cv.getBoundingClientRect();
     const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
     if (hit) focusNode(hit.id);
-  });
+  };
+  cv.addEventListener('pointerup', release);
+  // Without this a cancelled touch (the OS taking over, a call arriving) would
+  // leave a stale pointer in the map and the next tap would read as a pinch.
+  cv.addEventListener('pointercancel', release);
+
   cv.addEventListener('wheel', (e) => {
     e.preventDefault();
     const rect = cv.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    const ns = Math.max(0.12, Math.min(5, sim.scale * Math.exp(-e.deltaY * 0.0015)));
-    sim.tx = mx - ((mx - sim.tx) * ns) / sim.scale;
-    sim.ty = my - ((my - sim.ty) * ns) / sim.scale;
-    sim.scale = ns;
-    paint();
+    zoomAt(e.clientX - rect.left, e.clientY - rect.top, sim.scale * Math.exp(-e.deltaY * 0.0015));
   }, { passive: false });
-  window.addEventListener('resize', () => { setPanelWidths(); paint(); });
+
+  window.addEventListener('resize', () => { syncViewportMode(); setPanelWidths(); paint(); });
+  // Mobile Safari reports the old dimensions during the rotation itself, so the
+  // refit waits for the new ones to settle.
+  window.addEventListener('orientationchange', () => {
+    setTimeout(() => { syncViewportMode(); setPanelWidths(); fit(); }, 280);
+  });
 })();
 
 // ---------------------------------------------------------------- focus panel
@@ -1550,10 +1621,41 @@ function renderStatus() {
 const PANEL_W = { wide: { left: 312, right: 336 }, narrow: { left: 268, right: 300 } };
 const COLLAPSED_W = 30;
 
+/* Below this width app.css drops the three-column grid and turns both panels
+   into drawers. Keep the number in step with the @media block there. */
+const PHONE_MQ = matchMedia('(max-width: 860px)');
+const isPhone = () => PHONE_MQ.matches;
+
+/** Open or close one of the phone drawers. Only one is ever open: the panel is
+    380px wide over a screen that may be 390px. */
+function setDrawer(side, open) {
+  const body = document.body;
+  body.classList.toggle(`m-${side}-open`, open);
+  if (open) body.classList.remove(`m-${side === 'left' ? 'right' : 'left'}-open`);
+  const anyOpen = body.classList.contains('m-left-open') || body.classList.contains('m-right-open');
+  const scrim = $('#drawer-scrim');
+  if (scrim) scrim.hidden = !anyOpen;
+  for (const s of ['left', 'right']) {
+    const b = $(`#m-${s}`);
+    if (b) b.setAttribute('aria-expanded', String(body.classList.contains(`m-${s}-open`)));
+  }
+}
+
+const closeDrawers = () => { setDrawer('left', false); setDrawer('right', false); };
+
+/** Phone-only state must not survive a widen back to the desktop layout, where
+    a drawer would sit as a fixed panel over the graph with no way to dismiss it. */
+function syncViewportMode() {
+  if (!isPhone()) closeDrawers();
+}
+
 /** Set the grid tracks inline; a stylesheet rule for this did not take effect. */
 function setPanelWidths() {
   const gm = document.querySelector('.graph-main');
   if (!gm) return;
+  // On a phone the panels are drawers, not grid tracks. The stylesheet owns the
+  // single column there, and an inline value would only fight it.
+  if (isPhone()) { gm.style.gridTemplateColumns = ''; return; }
   if (!state.leftCollapsed && !state.rightCollapsed) {
     gm.style.gridTemplateColumns = '';   // hand it back to the stylesheet
     return;
@@ -1611,6 +1713,9 @@ const LAYOUT_HINTS = {
 function focusNode(id) {
   state.focus = id;
   if (state.tab !== 'graph') switchTab('graph');
+  // On a phone the link that was clicked is almost always inside a drawer that
+  // is covering the graph it just changed.
+  if (isPhone()) closeDrawers();
   refreshGraph();
 }
 
@@ -2047,8 +2152,36 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
 });
 
 $('#search-open').addEventListener('click', openPalette);
-$('#toggle-left').addEventListener('click', () => setCollapsed('left', !state.leftCollapsed));
-$('#toggle-right').addEventListener('click', () => setCollapsed('right', !state.rightCollapsed));
+// The chevrons collapse a grid track on a desktop; on a phone the same panel is
+// a drawer, and the only sensible thing the button can do is dismiss it.
+$('#toggle-left').addEventListener('click', () => {
+  if (isPhone()) setDrawer('left', false); else setCollapsed('left', !state.leftCollapsed);
+});
+$('#toggle-right').addEventListener('click', () => {
+  if (isPhone()) setDrawer('right', false); else setCollapsed('right', !state.rightCollapsed);
+});
+
+$('#m-left').addEventListener('click', () => {
+  setDrawer('left', !document.body.classList.contains('m-left-open'));
+});
+$('#m-right').addEventListener('click', () => {
+  setDrawer('right', !document.body.classList.contains('m-right-open'));
+});
+$('#drawer-scrim').addEventListener('click', closeDrawers);
+
+$('#zoom-in').addEventListener('click', () => zoomStep(1.35));
+$('#zoom-out').addEventListener('click', () => zoomStep(1 / 1.35));
+
+// The layout overlay is a fifth of a phone screen. It opens folded there, and
+// whichever way the viewer leaves it sticks for the session.
+(() => {
+  const ov = $('#ov-controls'), btn = $('#ov-toggle');
+  if (!ov || !btn) return;
+  if (isPhone()) ov.classList.add('collapsed');
+  const sync = () => btn.setAttribute('aria-expanded', String(!ov.classList.contains('collapsed')));
+  sync();
+  btn.addEventListener('click', () => { ov.classList.toggle('collapsed'); sync(); });
+})();
 
 $('#lab-q').addEventListener('input', (e) => { state.lab.q = e.target.value; renderLab(); });
 $('#lab-layer').addEventListener('change', (e) => { state.lab.layer = e.target.value; renderLab(); });
@@ -2067,6 +2200,8 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === 'd') switchTab('lab');
   else if (e.key === '[') setCollapsed('left', !state.leftCollapsed);
   else if (e.key === ']') setCollapsed('right', !state.rightCollapsed);
+  else if (e.key === 'Escape' && (document.body.classList.contains('m-left-open')
+    || document.body.classList.contains('m-right-open'))) closeDrawers();
   else if (e.key === 'Escape' && state.focus) { state.focus = null; refreshGraph(); }
 });
 

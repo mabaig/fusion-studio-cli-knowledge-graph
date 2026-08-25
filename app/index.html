@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Fusion AI Studio Explorer</title>
 <!-- A LinkedIn-style badge: rounded square, lowercase wordmark. Inline so the
      single-file bundle stays self-contained. rgb() rather than #0A66C2, because a
@@ -69,6 +69,14 @@ try {
 
 <!-- ------------------------------------------------------------- graph -->
 <section id="graph">
+  <!-- Phone only: the side panels become drawers, so their collapse toggles go
+       off-screen with them. These stay put. -->
+  <div class="mbar">
+    <button type="button" id="m-left" aria-expanded="false">&#9776; Browse</button>
+    <button type="button" id="m-right" aria-expanded="false">Details &rsaquo;</button>
+  </div>
+  <div class="drawer-scrim" id="drawer-scrim" hidden></div>
+
   <div class="graph-main">
     <aside class="side left" id="left-panel">
       <button class="panel-toggle" id="toggle-left" title="Collapse panel ([)" aria-expanded="true">‹</button>
@@ -80,11 +88,14 @@ try {
       <canvas id="cv"></canvas>
 
       <div class="stage-actions">
+        <button id="zoom-out" class="touch-only" title="Zoom out" aria-label="Zoom out">&minus;</button>
+        <button id="zoom-in" class="touch-only" title="Zoom in" aria-label="Zoom in">+</button>
         <button id="fit">Fit</button>
         <button id="clear-focus">Clear</button>
       </div>
 
-      <div class="overlay ov-controls">
+      <div class="overlay ov-controls" id="ov-controls">
+        <button type="button" class="ov-toggle" id="ov-toggle" aria-expanded="true">Layout &amp; depth</button>
         <div class="lbl"><span>Depth</span><span id="depth-v">3 hops</span></div>
         <input id="depth" type="range" min="1" max="3" value="3">
         <div class="lbl"><span>Layout</span></div>
