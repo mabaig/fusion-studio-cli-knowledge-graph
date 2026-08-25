@@ -144,6 +144,18 @@ body { display: flex; flex-direction: column; }
   cursor: pointer;
 }
 .tabstrip button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.tabstrip a.tablink {
+  display: flex; align-items: center;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  text-decoration: none;
+  padding: 9px 18px;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-dim);
+}
+.tabstrip a.tablink:hover { color: var(--accent); border-bottom-color: var(--accent); }
 .tabstrip .spacer { flex: 1 1 auto; }
 .tabstrip .build { padding: 9px 14px; }
 

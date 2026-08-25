@@ -1,0 +1,951 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How a Fusion Agentic App Runs</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' ry='14' fill='rgb(10,102,194)'/%3E%3Ctext x='32' y='40' text-anchor='middle' textLength='50' lengthAdjust='spacingAndGlyphs' font-family='Helvetica,Arial,sans-serif' font-size='24' font-weight='700' fill='white'%3Ebaig%3C/text%3E%3C/svg%3E">
+<script>
+/* Same key as the explorer, so a viewer who picked a theme there keeps it here.
+   Applied before first paint to avoid a flash of the wrong palette. */
+try {
+  var t = localStorage.getItem('fusion-explorer-theme');
+  if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+} catch (e) { /* blocked storage: fall through to the system theme */ }
+</script>
+<style>
+/* Palette lifted from app.css so the two pages read as one site. Kept inline:
+   this page is otherwise self-contained and the build copies it verbatim. */
+:root {
+  color-scheme: dark light;
+  --bg: #0e0d10;
+  --bg-deep: #0a090c;
+  --panel: #16151a;
+  --panel-2: #1d1b22;
+  --panel-3: #24222b;
+  --border: #2b2932;
+  --border-soft: #221f28;
+  --fg: #e8e5df;
+  --fg-mid: #a8a29a;
+  --fg-dim: #736d65;
+  --accent: #e0863c;
+  --accent-soft: #2a1d12;
+  --danger: #d9534f;
+
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Stage colours are the explorer's stack-layer colours, so a shape here means
+     the same thing as the same colour there. */
+  --c-app: #c58af9;      /* Agentic applications */
+  --c-team: #8ab4f8;     /* Agent teams */
+  --c-agent: #5ec8bf;    /* Agents */
+  --c-tool: #6dd58c;     /* Tools */
+  --c-internal: #6d8fc4; /* Agent internals */
+  --c-rule: #fbc02d;     /* Rules & conventions */
+  --c-find: #9aa0a6;     /* Findings */
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f6f4ef; --bg-deep: #efece5; --panel: #fffefb; --panel-2: #f2efe8;
+    --panel-3: #e8e4da; --border: #d9d4c8; --border-soft: #e5e1d6;
+    --fg: #1e1c19; --fg-mid: #57534c; --fg-dim: #857f75;
+    --accent: #b8590f; --accent-soft: #fbeee2;
+    --c-app: #7b3fb8; --c-team: #2f6ad0; --c-agent: #1d7f77;
+    --c-tool: #2e8b4f; --c-internal: #40598f; --c-rule: #9a7500; --c-find: #6b7075;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f4ef; --bg-deep: #efece5; --panel: #fffefb; --panel-2: #f2efe8;
+  --panel-3: #e8e4da; --border: #d9d4c8; --border-soft: #e5e1d6;
+  --fg: #1e1c19; --fg-mid: #57534c; --fg-dim: #857f75;
+  --accent: #b8590f; --accent-soft: #fbeee2;
+  --c-app: #7b3fb8; --c-team: #2f6ad0; --c-agent: #1d7f77;
+  --c-tool: #2e8b4f; --c-internal: #40598f; --c-rule: #9a7500; --c-find: #6b7075;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.65 var(--sans);
+  -webkit-text-size-adjust: 100%;
+}
+.lbl {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.13em;
+  text-transform: uppercase; color: var(--fg-dim);
+}
+code {
+  font-family: var(--mono); font-size: 0.86em;
+  background: var(--panel-3); border: 1px solid var(--border-soft);
+  border-radius: 4px; padding: 0.5px 4px; overflow-wrap: anywhere;
+}
+a { color: var(--accent); }
+
+/* ------------------------------------------------------------- chrome */
+
+.topbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: stretch; gap: 0;
+  background: color-mix(in srgb, var(--bg-deep) 94%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar a.tab, .topbar span.tab {
+  display: flex; align-items: center;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.13em;
+  text-transform: uppercase; text-decoration: none;
+  padding: 11px 16px;
+  border-bottom: 2px solid transparent;
+  color: var(--fg-dim);
+}
+.topbar a.tab:hover { color: var(--fg-mid); }
+.topbar .tab.here { color: var(--fg); border-bottom-color: var(--accent); }
+.topbar .spacer { flex: 1 1 auto; }
+.theme {
+  display: flex; align-items: center; align-self: center; gap: 1px;
+  margin-right: 10px; padding: 1px;
+  border: 1px solid var(--border); border-radius: 5px; background: var(--panel);
+}
+.theme button {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.1em;
+  text-transform: uppercase; padding: 4px 9px;
+  border: 0; border-radius: 4px; background: transparent;
+  color: var(--fg-dim); cursor: pointer;
+}
+.theme button[aria-pressed="true"] { background: var(--panel-3); color: var(--fg); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 72px; }
+
+header.hero { padding: 42px 0 26px; border-bottom: 1px solid var(--border-soft); }
+header.hero h1 {
+  font: 400 40px/1.12 var(--serif); margin: 0 0 6px; letter-spacing: -0.015em;
+}
+header.hero .kicker { margin-bottom: 12px; }
+header.hero p.lede {
+  max-width: 68ch; margin: 0 0 6px; font-size: 16.5px; color: var(--fg-mid);
+}
+header.hero p.lede strong { color: var(--fg); font-weight: 600; }
+
+.factbar {
+  display: flex; flex-wrap: wrap; gap: 8px 10px; margin-top: 20px;
+}
+.fact {
+  display: flex; align-items: baseline; gap: 6px;
+  padding: 5px 11px;
+  background: var(--panel-2); border: 1px solid var(--border-soft);
+  border-radius: 999px; font-size: 12.5px; color: var(--fg-mid);
+}
+.fact b { color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------- the figure */
+
+.figure { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 22px; margin-top: 30px; }
+
+.diagram-shell {
+  position: relative;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden;
+}
+.diagram-scroll { overflow: auto; scrollbar-width: thin; }
+.diagram-scroll svg { display: block; width: 100%; min-width: 660px; height: auto; }
+
+.controls {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border); background: var(--panel-2);
+}
+.controls button {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.09em;
+  text-transform: uppercase;
+  padding: 7px 12px;
+  color: var(--fg-mid); background: var(--panel-3);
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+}
+.controls button:hover { color: var(--accent); border-color: var(--accent); }
+.controls button.primary { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.controls .track {
+  flex: 1 1 120px; min-width: 90px; height: 3px;
+  background: var(--panel-3); border-radius: 2px; overflow: hidden;
+}
+.controls .track > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.2s linear; }
+.controls .count { font-family: var(--mono); font-size: 10px; color: var(--fg-dim); white-space: nowrap; }
+
+.scroll-hint {
+  margin: 0; padding: 8px 12px 10px;
+  background: var(--panel-2); border-top: 1px solid var(--border-soft);
+  font-size: 11.5px; color: var(--fg-dim);
+}
+
+/* ------------------------------------------------------------- caption */
+
+.caption {
+  position: sticky; top: 62px; align-self: start;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 18px;
+}
+.caption .step-n {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 50%;
+  font-family: var(--mono); font-size: 11px;
+  background: var(--stage-c, var(--accent)); color: var(--bg-deep); font-weight: 700;
+}
+.caption h2 { font: 400 22px/1.2 var(--serif); margin: 10px 0 2px; }
+.caption .role { font-family: var(--mono); font-size: 10px; letter-spacing: 0.11em; text-transform: uppercase; color: var(--stage-c, var(--accent)); }
+.caption p { margin: 10px 0 0; font-size: 14px; color: var(--fg-mid); }
+.caption p strong { color: var(--fg); font-weight: 600; }
+.caption .rels { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 5px; }
+.caption .rel {
+  font-family: var(--mono); font-size: 10px;
+  padding: 3px 8px; border-radius: 999px;
+  background: var(--panel-3); border: 1px solid var(--border); color: var(--fg-dim);
+}
+.caption .egline {
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-soft);
+  font-size: 12.5px; color: var(--fg-dim);
+}
+.caption .egline b { display: block; color: var(--fg-mid); font-weight: 600; margin-bottom: 3px; }
+
+/* ------------------------------------------------------------- svg skin */
+
+svg .box { fill: var(--panel-2); stroke: var(--border); stroke-width: 1.5; }
+svg .stage .box { transition: fill 0.25s, stroke 0.25s, filter 0.25s; }
+svg .stage { cursor: pointer; }
+svg .stage:focus { outline: none; }
+svg .stage:focus-visible .box { stroke: var(--accent); stroke-width: 2.5; }
+svg .stage.on .box { fill: var(--panel-3); stroke: var(--sc); stroke-width: 2.5; }
+svg .stage.done .box { stroke: color-mix(in srgb, var(--sc) 55%, var(--border)); }
+
+svg .s-title { fill: var(--fg); font: 600 16px var(--sans); }
+svg .stage.on .s-title { fill: var(--sc); }
+svg .s-sub { fill: var(--fg-mid); font: 13px var(--sans); }
+svg .s-meta { fill: var(--fg-dim); font: 10.5px var(--mono); letter-spacing: 0.04em; }
+
+svg .badge { fill: var(--bg-deep); stroke: var(--border); stroke-width: 1.5; }
+svg .stage.on .badge { fill: var(--sc); stroke: var(--sc); }
+svg .badge-n { fill: var(--fg-dim); font: 700 13px var(--mono); text-anchor: middle; }
+svg .stage.on .badge-n { fill: var(--bg-deep); }
+
+svg .shell { fill: none; stroke: var(--border); stroke-width: 1.5; stroke-dasharray: 5 4; }
+svg .shell-lbl { fill: var(--fg-dim); font: 10.5px var(--mono); letter-spacing: 0.16em; }
+
+svg .flow { stroke: var(--fg-dim); stroke-width: 1.6; fill: none; }
+svg .flow.hot { stroke: var(--accent); stroke-width: 2.4; }
+svg .flow-lbl { fill: var(--fg-dim); font: 11px var(--sans); }
+svg .loop { stroke: var(--c-internal); stroke-width: 1.5; fill: none; stroke-dasharray: 6 5; opacity: 0.75; }
+svg .loop-lbl { fill: var(--c-internal); font: 10.5px var(--mono); }
+svg .err { stroke: var(--danger); stroke-width: 1.4; fill: none; stroke-dasharray: 4 4; opacity: 0.8; }
+svg .err-lbl { fill: var(--danger); font: 10.5px var(--mono); }
+
+svg .aside-box { fill: var(--panel-2); stroke: var(--sc); stroke-width: 1.5; stroke-dasharray: 4 4; }
+svg .aside-title { fill: var(--sc); font: 600 14px var(--sans); }
+svg .aside-sub { fill: var(--fg-mid); font: 11.5px var(--sans); }
+svg .aside-meta { fill: var(--fg-dim); font: 10px var(--mono); }
+svg .tick { fill: var(--fg-dim); font: 11px var(--sans); }
+
+svg .endpoint { fill: var(--panel-3); stroke: var(--fg-dim); stroke-width: 1.5; }
+svg .endpoint-t { fill: var(--fg); font: 600 15px var(--sans); }
+svg .endpoint-s { fill: var(--fg-dim); font: 11.5px var(--sans); }
+
+#token { fill: var(--accent); stroke: var(--bg); stroke-width: 2; }
+#token-halo { fill: var(--accent); opacity: 0.22; }
+.no-anim #token, .no-anim #token-halo { display: none; }
+
+/* ------------------------------------------------------------- prose */
+
+section.steps { margin-top: 52px; }
+section.steps h2, section.example h2, section.notes h2 {
+  font: 400 27px/1.2 var(--serif); margin: 0 0 6px;
+}
+section.steps > p.intro, section.example > p.intro { max-width: 70ch; color: var(--fg-mid); margin: 0 0 22px; }
+
+ol.walk { list-style: none; margin: 0; padding: 0; counter-reset: w; }
+ol.walk > li {
+  position: relative; counter-increment: w;
+  padding: 0 0 22px 46px; margin: 0;
+  border-left: 1px solid var(--border-soft);
+}
+ol.walk > li:last-child { border-left-color: transparent; padding-bottom: 0; }
+ol.walk > li::before {
+  content: counter(w);
+  position: absolute; left: -13px; top: 0;
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  background: var(--sc, var(--accent)); color: var(--bg-deep);
+}
+ol.walk h3 { font: 600 16px var(--sans); margin: 0 0 4px; color: var(--fg); }
+ol.walk p { margin: 0 0 6px; color: var(--fg-mid); font-size: 14.5px; max-width: 72ch; }
+
+section.example { margin-top: 52px; }
+.trace {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 18px; overflow-x: auto;
+}
+.trace ol { list-style: none; margin: 0; padding: 0; min-width: 460px; }
+.trace li {
+  display: grid; grid-template-columns: 132px 1fr; gap: 12px;
+  padding: 7px 0; border-bottom: 1px solid var(--border-soft); font-size: 13.5px;
+}
+.trace li:last-child { border-bottom: 0; }
+.trace .nt {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.06em;
+  padding: 2px 7px; border-radius: 999px; justify-self: start;
+  border: 1px solid var(--border); color: var(--fg-mid); background: var(--panel-3);
+}
+.trace .nt.llm { color: var(--c-agent); border-color: var(--c-agent); }
+.trace .nt.bo { color: var(--c-tool); border-color: var(--c-tool); }
+.trace .nt.ctl { color: var(--c-team); border-color: var(--c-team); }
+.trace .what { color: var(--fg-mid); }
+.trace .what b { color: var(--fg); font-weight: 600; }
+
+section.notes { margin-top: 52px; }
+.notegrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+.note {
+  background: var(--panel); border: 1px solid var(--border);
+  border-left: 3px solid var(--sc, var(--accent));
+  border-radius: 10px; padding: 15px 16px;
+}
+.note h3 { font: 600 15px var(--sans); margin: 0 0 5px; }
+.note p { margin: 0; font-size: 13.5px; color: var(--fg-mid); }
+
+footer.site {
+  margin-top: 56px; padding-top: 18px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono); font-size: 11px; color: var(--fg-dim);
+  display: flex; flex-wrap: wrap; gap: 6px 14px;
+}
+footer.site a { color: var(--fg-mid); }
+
+/* ------------------------------------------------------------- responsive */
+
+@media (max-width: 1000px) {
+  .figure { grid-template-columns: minmax(0, 1fr); }
+  .caption { position: static; }
+  /* The diagram is taller than a phone screen, so it gets its own viewport and
+     the animation scrolls the active stage into it. */
+  .diagram-scroll { max-height: 60vh; }
+}
+@media (max-width: 660px) {
+  body { font-size: 14.5px; }
+  .wrap { padding: 0 14px 56px; }
+  header.hero { padding: 28px 0 20px; }
+  header.hero h1 { font-size: 29px; }
+  header.hero p.lede { font-size: 15px; }
+  .topbar a.tab, .topbar span.tab { padding: 11px 12px; letter-spacing: 0.1em; }
+  .theme { margin-right: 8px; }
+  .fact { font-size: 12px; padding: 4px 9px; }
+  .controls button { padding: 8px 11px; }
+  section.steps h2, section.example h2, section.notes h2 { font-size: 23px; }
+  ol.walk > li { padding-left: 34px; }
+  .trace li { grid-template-columns: 118px 1fr; gap: 9px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  #token, #token-halo { display: none; }
+}
+</style>
+</head>
+<body>
+
+<nav class="topbar">
+  <a class="tab" href="index.html">&lsaquo; Graph explorer</a>
+  <span class="tab here">How it works</span>
+  <span class="spacer"></span>
+  <div class="theme" role="group" aria-label="Colour theme">
+    <button type="button" data-set-theme="auto" aria-pressed="true">Auto</button>
+    <button type="button" data-set-theme="light" aria-pressed="false">Light</button>
+    <button type="button" data-set-theme="dark" aria-pressed="false">Dark</button>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="lbl kicker">Oracle Fusion AI Agent Studio &mdash; release-26C</div>
+  <h1>How a Fusion Agentic App Runs</h1>
+  <p class="lede">An LLM on its own can read a question and write an answer. What makes a Fusion
+  agentic app dependable is everything around it: the context the app hands over, the workflow that
+  routes the request, the business objects that fetch real Fusion data, and the rules that had to pass
+  before any of it shipped. <strong>Every stage below is a real artifact type</strong>, traced out of
+  Oracle&rsquo;s own sample corpus.</p>
+  <div class="factbar">
+    <span class="fact"><b>6</b> agentic apps</span>
+    <span class="fact"><b>113</b> workflows</span>
+    <span class="fact"><b>1,686</b> workflow nodes</span>
+    <span class="fact"><b>18</b> of 26 node types in use</span>
+    <span class="fact"><b>9</b> tool types</span>
+    <span class="fact"><b>75</b> business objects</span>
+    <span class="fact"><b>109</b> REST resources</span>
+    <span class="fact"><b>1,676</b> authoring rules</span>
+  </div>
+</header>
+
+<!-- ------------------------------------------------------------- figure -->
+
+<div class="figure">
+  <div class="diagram-shell">
+    <div class="diagram-scroll" id="dscroll">
+      <svg id="dia" viewBox="0 0 960 1150" preserveAspectRatio="xMidYMid meet"
+           role="img" aria-label="Animated diagram of the Fusion agentic app runtime, from user goal through six stages to a rendered panel">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--fg-dim)"/>
+          </marker>
+          <marker id="ar-hot" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--accent)"/>
+          </marker>
+          <marker id="ar-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--c-internal)"/>
+          </marker>
+          <marker id="ar-err" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="var(--danger)"/>
+          </marker>
+        </defs>
+
+        <!-- user -->
+        <g class="stage" data-stage="0" tabindex="0" role="button" style="--sc: var(--c-app)">
+          <rect class="endpoint box" x="210" y="16" width="380" height="66" rx="14"/>
+          <text class="endpoint-t" x="400" y="46" text-anchor="middle">User opens a panel</text>
+          <text class="endpoint-s" x="400" y="66" text-anchor="middle">clicks an action, or types a question</text>
+        </g>
+        <path class="flow" d="M400 82 L400 118" marker-end="url(#ar)"/>
+        <text class="flow-lbl" x="412" y="105">intent</text>
+
+        <!-- runtime shell -->
+        <rect class="shell" x="58" y="118" width="602" height="884" rx="16"/>
+        <text class="shell-lbl" x="76" y="140">THE AGENTIC APP RUNTIME</text>
+
+        <!-- 1 -->
+        <g class="stage" data-stage="1" tabindex="0" role="button" style="--sc: var(--c-app)">
+          <rect class="box" x="170" y="158" width="460" height="92" rx="13"/>
+          <circle class="badge" cx="150" cy="182" r="17"/>
+          <text class="badge-n" x="150" y="187">1</text>
+          <text class="s-title" x="196" y="190">App context</text>
+          <text class="s-sub" x="196" y="213">what the user just did, packed into $Ora* keys</text>
+          <text class="s-meta" x="196" y="234">reads_app_context &middot; invokes_workflow</text>
+        </g>
+        <path class="flow" d="M400 250 L400 294" marker-end="url(#ar)"/>
+        <text class="flow-lbl" x="412" y="277">grounded input</text>
+
+        <!-- 2 -->
+        <g class="stage" data-stage="2" tabindex="0" role="button" style="--sc: var(--c-team)">
+          <rect class="box" x="170" y="294" width="460" height="92" rx="13"/>
+          <circle class="badge" cx="150" cy="318" r="17"/>
+          <text class="badge-n" x="150" y="323">2</text>
+          <text class="s-title" x="196" y="326">Agent dispatch</text>
+          <text class="s-sub" x="196" y="349">the app exposes an agent &mdash; which is a workflow</text>
+          <text class="s-meta" x="196" y="370">exposes_agent &middot; rendered_by &middot; routes_app_stage</text>
+        </g>
+        <path class="flow" d="M400 386 L400 430" marker-end="url(#ar)"/>
+        <text class="flow-lbl" x="412" y="413">START &rarr; node</text>
+
+        <!-- 3 -->
+        <g class="stage" data-stage="3" tabindex="0" role="button" style="--sc: var(--c-agent)">
+          <rect class="box" x="170" y="430" width="460" height="92" rx="13"/>
+          <circle class="badge" cx="150" cy="454" r="17"/>
+          <text class="badge-n" x="150" y="459">3</text>
+          <text class="s-title" x="196" y="462">Reasoning &mdash; the LLM node</text>
+          <text class="s-sub" x="196" y="485">bounded work: classify, extract, summarise, branch</text>
+          <text class="s-meta" x="196" y="506">uses_model &middot; 282 LLM nodes</text>
+        </g>
+        <path class="flow" d="M400 522 L400 566" marker-end="url(#ar)"/>
+        <text class="flow-lbl" x="412" y="549">chosen path</text>
+
+        <!-- 4 -->
+        <g class="stage" data-stage="4" tabindex="0" role="button" style="--sc: var(--c-internal)">
+          <rect class="box" x="170" y="566" width="460" height="92" rx="13"/>
+          <circle class="badge" cx="150" cy="590" r="17"/>
+          <text class="badge-n" x="150" y="595">4</text>
+          <text class="s-title" x="196" y="598">Action nodes do the work</text>
+          <text class="s-sub" x="196" y="621">CODE &middot; BO_FUNCTION &middot; TOOL &middot; SWITCH &middot; PARALLEL &middot; LOOP</text>
+          <text class="s-meta" x="196" y="642">flows_to &middot; converges_to &middot; reads_output_of</text>
+        </g>
+        <path class="flow" d="M400 658 L400 702" marker-end="url(#ar)"/>
+        <text class="flow-lbl" x="412" y="685">function call</text>
+
+        <!-- 5 -->
+        <g class="stage" data-stage="5" tabindex="0" role="button" style="--sc: var(--c-tool)">
+          <rect class="box" x="170" y="702" width="460" height="92" rx="13"/>
+          <circle class="badge" cx="150" cy="726" r="17"/>
+          <text class="badge-n" x="150" y="731">5</text>
+          <text class="s-title" x="196" y="734">Real Fusion data</text>
+          <text class="s-sub" x="196" y="757">business object &rarr; function &rarr; REST resource</text>
+          <text class="s-meta" x="196" y="778">calls_bo_function &middot; calls_rest</text>
+        </g>
+        <path class="flow" d="M400 794 L400 838" marker-end="url(#ar)"/>
+        <text class="flow-lbl" x="412" y="821">shaped result</text>
+
+        <!-- 6 -->
+        <g class="stage" data-stage="6" tabindex="0" role="button" style="--sc: var(--c-app)">
+          <rect class="box" x="170" y="838" width="460" height="92" rx="13"/>
+          <circle class="badge" cx="150" cy="862" r="17"/>
+          <text class="badge-n" x="150" y="867">6</text>
+          <text class="s-title" x="196" y="870">Render back into the panel</text>
+          <text class="s-sub" x="196" y="893">RETURN / END hand the answer to the panel that asked</text>
+          <text class="s-meta" x="196" y="914">rendered_by &middot; 42 RETURN &middot; 119 END</text>
+        </g>
+
+        <!-- node-to-node feedback: later nodes read earlier output -->
+        <path class="loop" d="M170 612 L124 612 L124 476 L166 476" marker-end="url(#ar-loop)"/>
+        <text class="loop-lbl" x="70" y="548">reads_output_of</text>
+        <!-- error path -->
+        <path class="err" d="M630 612 L676 612 L676 884 L634 884" marker-end="url(#ar-err)"/>
+        <text class="err-lbl" x="686" y="760" transform="rotate(90 686 760)">on_error_to</text>
+        <!-- next turn -->
+        <path class="loop" d="M170 884 L92 884 L92 204 L166 204" marker-end="url(#ar-loop)"/>
+        <text class="loop-lbl" x="40" y="548" transform="rotate(-90 40 548)">next turn &middot; panel state</text>
+
+        <!-- result -->
+        <path class="flow" d="M400 1002 L400 1042" marker-end="url(#ar)"/>
+        <text class="flow-lbl" x="412" y="1028">answered</text>
+        <g class="stage" data-stage="7" tabindex="0" role="button" style="--sc: var(--c-app)">
+          <rect class="endpoint box" x="210" y="1042" width="380" height="66" rx="14"/>
+          <text class="endpoint-t" x="400" y="1072" text-anchor="middle">The panel updates</text>
+          <text class="endpoint-s" x="400" y="1092" text-anchor="middle">grounded in Fusion data, inside the app</text>
+        </g>
+
+        <!-- cross-cutting: authoring rules -->
+        <g class="stage" data-stage="8" tabindex="0" role="button" style="--sc: var(--c-rule)">
+          <rect class="aside-box" x="700" y="180" width="242" height="188" rx="13"/>
+          <text class="aside-title" x="722" y="210">Rules &amp; conventions</text>
+          <text class="aside-sub" x="722" y="233">1,676 rules that govern</text>
+          <text class="aside-sub" x="722" y="251">how this is built</text>
+          <text class="aside-meta" x="722" y="277">governs &rarr; node types</text>
+          <text class="aside-meta" x="722" y="294">governs &rarr; CLI commands</text>
+          <text class="tick" x="722" y="322">Enforced at authoring</text>
+          <text class="tick" x="722" y="340">time by aistudio</text>
+          <text class="tick" x="722" y="358">validate &mdash; not at runtime.</text>
+        </g>
+        <path class="flow" d="M700 274 L636 274" stroke-dasharray="4 4" marker-end="url(#ar)"/>
+
+        <!-- cross-cutting: findings -->
+        <g class="stage" data-stage="9" tabindex="0" role="button" style="--sc: var(--c-find)">
+          <rect class="aside-box" x="700" y="440" width="242" height="150" rx="13"/>
+          <text class="aside-title" x="722" y="470">Findings</text>
+          <text class="aside-sub" x="722" y="493">unwired branches,</text>
+          <text class="aside-sub" x="722" y="511">unresolved references</text>
+          <text class="aside-meta" x="722" y="537">has_issue</text>
+          <text class="tick" x="722" y="563">What the graph spots</text>
+          <text class="tick" x="722" y="581">that a reviewer would not.</text>
+        </g>
+
+        <!-- travelling request -->
+        <circle id="token-halo" cx="236" cy="49" r="13"/>
+        <circle id="token" cx="236" cy="49" r="7"/>
+      </svg>
+    </div>
+
+    <div class="controls">
+      <button type="button" id="play" class="primary" aria-label="Pause">&#10073;&#10073; Pause</button>
+      <button type="button" id="prev">&larr; Prev</button>
+      <button type="button" id="next">Next &rarr;</button>
+      <button type="button" id="restart">Restart</button>
+      <span class="track"><i id="track-fill"></i></span>
+      <span class="count" id="count">1 / 8</span>
+    </div>
+    <p class="scroll-hint" id="scroll-hint" hidden>Drag the diagram sideways &mdash; the rules and findings layers sit to the right.</p>
+  </div>
+
+  <aside class="caption" id="caption" aria-live="polite">
+    <span class="step-n" id="cap-n">0</span>
+    <div class="role" id="cap-role"></div>
+    <h2 id="cap-title"></h2>
+    <p id="cap-body"></p>
+    <div class="rels" id="cap-rels"></div>
+    <div class="egline" id="cap-eg"></div>
+  </aside>
+</div>
+
+<!-- ------------------------------------------------------------- steps -->
+
+<section class="steps">
+  <h2>The same thing, in words</h2>
+  <p class="intro">Six stages between a click and an answer. The names in <code>code</code> are the
+  actual artifact types and relations you can search in the graph explorer.</p>
+
+  <ol class="walk">
+    <li style="--sc: var(--c-app)">
+      <h3>The app hands over context, not just a question</h3>
+      <p>An agentic app is a <code>.app</code> artifact whose panels are laid out by a page pattern.
+      When the user clicks, the app packs the situation into context keys &mdash;
+      <code>$app.$OraAction</code>, <code>$app.$OraPanelName</code>, <code>$app.$OraMessageHint</code>,
+      <code>$app.$OraUserContext</code> &mdash; so the workflow starts knowing which panel asked and
+      what was clicked. Some apps go further and call a dedicated context workflow first.</p>
+    </li>
+    <li style="--sc: var(--c-team)">
+      <h3>An &ldquo;agent&rdquo; on the app surface is a workflow</h3>
+      <p>This is the part that surprises people. The app <code>exposes_agent</code> straight to a
+      <strong>workflow</strong>, and each panel is <code>rendered_by</code> one. Of the 113 workflows in the
+      corpus, 31 sit at the agent-team layer acting as supervisors and 82 at the agent layer. There is no
+      separate agent runtime to reason about &mdash; the workflow <em>is</em> the agent.</p>
+    </li>
+    <li style="--sc: var(--c-agent)">
+      <h3>The LLM is one node type among eighteen</h3>
+      <p>Reasoning happens in <code>LLM</code> nodes &mdash; 282 of them &mdash; each bound to a model
+      configuration via <code>uses_model</code>. Their job is deliberately narrow: classify the request,
+      extract fields, pick a branch, phrase a summary. They do not call anything. That keeps the
+      unpredictable part small and the auditable part large.</p>
+    </li>
+    <li style="--sc: var(--c-internal)">
+      <h3>Deterministic nodes do the actual work</h3>
+      <p>The bulk of every workflow is ordinary machinery: 458 <code>CODE</code> nodes, 295
+      <code>BO_FUNCTION</code>, 132 <code>CONDITION</code>, 102 <code>SWITCH</code>, plus
+      <code>PARALLEL</code>, <code>LOOP</code>, <code>SET_FIELDS</code> and sub-workflows. They chain
+      with <code>flows_to</code>, merge with <code>converges_to</code>, fail over with
+      <code>on_error_to</code>, and pass results with <code>reads_output_of</code>.</p>
+    </li>
+    <li style="--sc: var(--c-tool)">
+      <h3>Data comes from Fusion, not from the model</h3>
+      <p>A <code>BO_FUNCTION</code> node <code>calls_bo_function</code> on a business object, and that
+      function <code>calls_rest</code> against a real Fusion REST resource. 75 business objects, 193
+      functions, 109 endpoints. Nine tool types cover the rest: business object, document retrieval
+      (RAG), external REST, MCP, deep link, email, calculator, user query and multi-file processor.</p>
+    </li>
+    <li style="--sc: var(--c-app)">
+      <h3>The answer lands back in the panel that asked</h3>
+      <p><code>RETURN</code> and <code>END</code> hand the shaped result back, and the panel
+      <code>rendered_by</code> that workflow paints it &mdash; in place, inside the app, next to the data
+      it describes. What the user did then becomes the app context for the next turn.</p>
+    </li>
+  </ol>
+</section>
+
+<!-- ------------------------------------------------------------- example -->
+
+<section class="example">
+  <h2>A real one, end to end</h2>
+  <p class="intro"><strong>Accounting Exceptions</strong> &mdash; an agent-team workflow of 35 nodes
+  behind one panel in the Cost Accounting Period Close workspace. Abridged to the spine; the
+  branches are real but omitted.</p>
+  <div class="trace">
+    <ol>
+      <li><span class="nt ctl">START</span><span class="what">The panel asks. <b>Accounting Exceptions</b> begins.</span></li>
+      <li><span class="nt">CODE</span><span class="what"><b>Read Application Context</b> &mdash; pulls <code>$OraAction</code>, <code>$OraMessageHint</code>, <code>$OraAppContext</code></span></li>
+      <li><span class="nt ctl">WORKFLOW</span><span class="what"><b>Get Application Context</b> &mdash; delegates to the shared <b>Ledger Insights Context Workflow</b></span></li>
+      <li><span class="nt">CODE</span><span class="what"><b>Identify Request Type</b> &mdash; is this an initial display, or an action the user picked?</span></li>
+      <li><span class="nt ctl">SWITCH</span><span class="what"><b>Choose Starting Path</b> &mdash; routes on the app action, exactly as the authoring rule requires</span></li>
+      <li><span class="nt">CODE</span><span class="what"><b>Prepare Transaction Request</b> &mdash; builds the query payload</span></li>
+      <li><span class="nt bo">BO_FUNCTION</span><span class="what"><b>Get Transactions for Selected Issue</b> &rarr; <code>getTransactionsforErrorCategory()</code> on <b>Accounting Exceptions Lookup</b> &rarr; <code>/api/boss/extraction/extract</code></span></li>
+      <li><span class="nt bo">BO_FUNCTION</span><span class="what"><b>Count Transactions by Category</b> &mdash; a second read against the same object</span></li>
+      <li><span class="nt">CODE</span><span class="what"><b>Review Transactions for Selected Issue</b> &mdash; shapes rows for display</span></li>
+      <li><span class="nt ctl">CONDITION</span><span class="what"><b>Choose Transaction Display</b> &mdash; all of them, or just the top ones?</span></li>
+      <li><span class="nt llm">LLM</span><span class="what"><b>Show Top Transactions</b> &mdash; the model writes the narrative over data it was handed, not data it recalled</span></li>
+      <li><span class="nt llm">LLM</span><span class="what"><b>Prepare Page Subtitle</b> &mdash; one line of prose for the panel header</span></li>
+      <li><span class="nt ctl">END</span><span class="what">Back to the <b>Accounting Exceptions</b> panel, which is <code>rendered_by</code> this workflow.</span></li>
+    </ol>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- notes -->
+
+<section class="notes">
+  <h2>Two things that differ from the generic picture</h2>
+  <div class="notegrid">
+    <div class="note" style="--sc: var(--c-rule)">
+      <h3>The constraints layer runs before shipping, not during</h3>
+      <p>Generic agent harnesses put a policy gate in the request path, deciding at runtime whether a
+      proposed action is allowed. Fusion&rsquo;s equivalent sits earlier: 1,676 authoring rules that
+      <code>governs</code> node types and CLI commands, checked by <code>aistudio validate</code>
+      before an artifact is ever deployed. A rule like &ldquo;for app-backed workflows, route on
+      <code>$context.$app.$OraAction</code>&rdquo; constrains the <em>author</em>, so the runtime does
+      not have to.</p>
+    </div>
+    <div class="note" style="--sc: var(--c-agent)">
+      <h3>The model is deliberately a small part of it</h3>
+      <p>282 LLM nodes against 1,686 workflow nodes in total &mdash; about one in six. The rest is
+      routing, data access and shaping. That ratio is the design: the reliability comes from how little
+      is left to the model, and how much of the path around it is a graph you can read, diff and
+      validate.</p>
+    </div>
+  </div>
+</section>
+
+<footer class="site">
+  <span>Explore all 5,048 artifacts in the <a href="index.html">graph explorer</a></span>
+  <span>&middot;</span>
+  <span>built by <a href="https://www.linkedin.com/in/mbaig162/" target="_blank" rel="noreferrer">Baig Mohammed</a></span>
+  <span>&middot;</span>
+  <span><a href="https://github.com/oracle/fusion-ai-studio" target="_blank" rel="noreferrer">Data derived from oracle/fusion-ai-studio &middot; UPL-1.0</a></span>
+  <span>&middot;</span>
+  <span>Independent project &mdash; not affiliated with or endorsed by Oracle.</span>
+</footer>
+
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = (s) => document.querySelector(s);
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ------------------------------------------------------------- theme */
+
+  const KEY = 'fusion-explorer-theme';
+  const stored = () => { try { return localStorage.getItem(KEY) || 'auto'; } catch (e) { return 'auto'; } };
+  function setTheme(t, persist = true) {
+    if (t === 'auto') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = t;
+    if (persist) { try { localStorage.setItem(KEY, t); } catch (e) { /* blocked */ } }
+    for (const b of document.querySelectorAll('[data-set-theme]')) {
+      b.setAttribute('aria-pressed', String(b.dataset.setTheme === t));
+    }
+  }
+  for (const b of document.querySelectorAll('[data-set-theme]')) {
+    b.addEventListener('click', () => setTheme(b.dataset.setTheme));
+  }
+  setTheme(stored(), false);
+
+  /* ------------------------------------------------------------- script */
+
+  // y of each stage's centre in viewBox units — the token's itinerary.
+  const STEPS = [
+    { s: 0, y: 49, x: 236, c: 'var(--c-app)', role: 'The ask',
+      title: 'A user opens a panel',
+      body: 'An agentic app is a <code>.app</code> artifact: a set of panels laid out by a page pattern. The user clicks an action, picks a row, or types a question. Nothing has reached a model yet.',
+      rels: ['app', 'appPanel', 'appAction'],
+      eg: ['In the sample corpus', '6 apps, 23 panels and 32 actions — the sample apps sit in FIN and HCM.'] },
+
+    { s: 1, y: 204, x: 186, c: 'var(--c-app)', role: 'Stage 1 · context',
+      title: 'App context',
+      body: 'The app packs what just happened into context keys the workflow can read — <code>$app.$OraAction</code>, <code>$app.$OraPanelName</code>, <code>$app.$OraMessageHint</code>, <code>$app.$OraUserContext</code>. Some apps call a dedicated context workflow first to enrich it.',
+      rels: ['reads_app_context', 'invokes_workflow', 'routes_app_stage'],
+      eg: ['Real example', '<b>Get Application Context</b> reads three keys, then delegates to the shared <b>Ledger Insights Context Workflow</b>.'] },
+
+    { s: 2, y: 340, x: 186, c: 'var(--c-team)', role: 'Stage 2 · dispatch',
+      title: 'Agent dispatch',
+      body: 'The app <code>exposes_agent</code> — and the target is a <strong>workflow</strong>. In Agent Studio an agent on the app surface <em>is</em> a workflow; each panel is <code>rendered_by</code> one. 31 workflows act as supervising agent teams, 82 as agents.',
+      rels: ['exposes_agent', 'rendered_by', 'summarized_by'],
+      eg: ['Real example', 'The <b>Accounting Exceptions</b> panel is rendered by the <b>Accounting Exceptions</b> workflow — 35 nodes, agent-team layer.'] },
+
+    { s: 3, y: 476, x: 186, c: 'var(--c-agent)', role: 'Stage 3 · reasoning',
+      title: 'The LLM node',
+      body: 'Reasoning is scoped to <code>LLM</code> nodes, each bound to a model configuration through <code>uses_model</code>. They classify, extract, choose a branch or phrase a summary — and they call nothing themselves. 282 of them across 1,686 workflow nodes: about one in six.',
+      rels: ['uses_model', 'modelConfiguration', 'references_prompt'],
+      eg: ['Models in use', '<code>ORA_LLM_PREMIUM</code> and <code>ORA_MODEL_CONFIG_PREMIUM_OPEN_AI_GPT_4_1_MINI</code>.'] },
+
+    { s: 4, y: 612, x: 186, c: 'var(--c-internal)', role: 'Stage 4 · action',
+      title: 'Action nodes',
+      body: 'The deterministic majority: 458 <code>CODE</code>, 295 <code>BO_FUNCTION</code>, 132 <code>CONDITION</code>, 102 <code>SWITCH</code>, 52 <code>SET_FIELDS</code>, plus <code>PARALLEL</code>, <code>LOOP</code>, <code>WHILE</code>, <code>EMAIL</code> and 39 sub-workflow calls. They chain, branch, merge and fail over explicitly.',
+      rels: ['flows_to', 'converges_to', 'on_error_to', 'reads_output_of'],
+      eg: ['Why it matters', '1,814 flow edges and 1,185 output-passing edges — the execution path is data you can read, not behaviour you have to observe.'] },
+
+    { s: 5, y: 748, x: 186, c: 'var(--c-tool)', role: 'Stage 5 · data',
+      title: 'Real Fusion data',
+      body: 'A <code>BO_FUNCTION</code> node calls a function on a business object, and that function calls a Fusion REST resource. The model never supplies the numbers. Nine tool types cover everything else — RAG over documents, external REST, MCP, deep links, email, calculator.',
+      rels: ['calls_bo_function', 'calls_rest', 'exposes_rest_resource'],
+      eg: ['Real example', '<b>Get Transactions for Selected Issue</b> → <code>getTransactionsforErrorCategory()</code> → <code>/api/boss/extraction/extract</code>'] },
+
+    { s: 6, y: 884, x: 186, c: 'var(--c-app)', role: 'Stage 6 · render',
+      title: 'Back into the panel',
+      body: '<code>RETURN</code> and <code>END</code> hand the shaped result to the panel that asked for it — in place, inside the app, beside the data it describes. What the user does next becomes the app context for the following turn.',
+      rels: ['rendered_by', 'RETURN', 'END'],
+      eg: ['In the corpus', '42 RETURN nodes, 119 END nodes, 31 panels rendered by a workflow.'] },
+
+    { s: 7, y: 1075, x: 236, c: 'var(--c-app)', role: 'The answer',
+      title: 'The panel updates',
+      body: 'Grounded in Fusion data, routed by a workflow you can diff, produced by a path that was validated before it shipped. The loop closes: this panel state is the next request&rsquo;s context.',
+      rels: ['appPanel', 'appStage'],
+      eg: ['The whole point', 'Reliability came from the structure around the model, not from the model alone.'] },
+  ];
+
+  // The two cross-cutting cards are reachable by click but are not on the itinerary.
+  const ASIDES = {
+    8: { c: 'var(--c-rule)', role: 'Cross-cutting', title: 'Rules & conventions',
+      body: 'Where a generic harness puts a runtime policy gate, Fusion puts 1,676 authoring rules. They <code>governs</code> node types and CLI commands, and <code>aistudio validate</code> checks them before an artifact ships — constraining the author so the runtime does not have to.',
+      rels: ['governs', 'states', 'prescribes_command'],
+      eg: ['A real rule', '&ldquo;For app-backed workflows, route on <code>$context.$app.$OraAction</code>&rdquo; — governs SWITCH, LLM and AGENT node types.'] },
+    9: { c: 'var(--c-find)', role: 'Cross-cutting', title: 'Findings',
+      body: 'The lint layer: unwired branches, unresolved references, node types used without a spec. Not a runtime trace — a static read of the corpus that surfaces what a reviewer would miss.',
+      rels: ['has_issue'],
+      eg: ['Worth knowing', 'The <code>ADD</code> node type is builder scaffolding on an unfilled branch — counted separately, so it stops masquerading as a documentation gap.'] },
+  };
+
+  const svg = $('#dia');
+  const stages = [...svg.querySelectorAll('.stage')];
+  const stageBy = new Map(stages.map((g) => [Number(g.dataset.stage), g]));
+  const token = $('#token'), halo = $('#token-halo');
+  const scroller = $('#dscroll');
+
+  let idx = 0;            // index into STEPS
+  let playing = !reduced;
+  let raf = 0, phaseStart = 0, travelling = false;
+  let from = STEPS[0], to = STEPS[0];
+
+  const TRAVEL = 780;     // ms moving between stages
+  const DWELL = 2400;     // ms held on a stage
+
+  /* ------------------------------------------------------------- render */
+
+  function paintCaption(d, n) {
+    const cap = $('#caption');
+    cap.style.setProperty('--stage-c', d.c);
+    $('#cap-n').textContent = n;
+    $('#cap-role').textContent = d.role;
+    $('#cap-title').textContent = d.title;
+    $('#cap-body').innerHTML = d.body;
+    $('#cap-rels').replaceChildren(...d.rels.map((r) => {
+      const s = document.createElement('span'); s.className = 'rel'; s.textContent = r; return s;
+    }));
+    $('#cap-eg').innerHTML = `<b>${d.eg[0]}</b>${d.eg[1]}`;
+  }
+
+  /** Keep the live stage visible when the diagram is in its own scroll box. */
+  function reveal(stageNum) {
+    const g = stageBy.get(stageNum);
+    if (!g || scroller.scrollHeight <= scroller.clientHeight + 4) return;
+    const box = g.querySelector('rect');
+    const ratio = scroller.scrollHeight / 1150;          // viewBox units → px
+    const mid = (Number(box.getAttribute('y')) + Number(box.getAttribute('height')) / 2) * ratio;
+    scroller.scrollTo({ top: mid - scroller.clientHeight / 2, behavior: reduced ? 'auto' : 'smooth' });
+  }
+
+  function show(i, { scroll = true } = {}) {
+    idx = (i + STEPS.length) % STEPS.length;
+    const d = STEPS[idx];
+    for (const g of stages) {
+      const n = Number(g.dataset.stage);
+      const pos = STEPS.findIndex((x) => x.s === n);
+      g.classList.toggle('on', n === d.s);
+      g.classList.toggle('done', pos !== -1 && pos < idx);
+    }
+    // Stages 1-6 are numbered in the diagram; the two endpoints are not.
+    paintCaption(d, d.s >= 1 && d.s <= 6 ? d.s : '\u00b7');
+    $('#count').textContent = `${idx + 1} / ${STEPS.length}`;
+    $('#track-fill').style.width = `${((idx + 1) / STEPS.length) * 100}%`;
+    if (scroll) reveal(d.s);
+  }
+
+  function moveToken(x, y) {
+    token.setAttribute('cx', x); token.setAttribute('cy', y);
+    halo.setAttribute('cx', x); halo.setAttribute('cy', y);
+  }
+
+  /** x follows a three-part profile: out of the card it is leaving, down the
+      arrow lane, then into the gutter of the card it arrives at. */
+  const laneX = (t) => {
+    if (t < 0.3) return from.x + (400 - from.x) * (t / 0.3);
+    if (t > 0.7) return 400 + (to.x - 400) * ((t - 0.7) / 0.3);
+    return 400;
+  };
+
+  /* ------------------------------------------------------------- loop */
+
+  function step(ts) {
+    raf = requestAnimationFrame(step);
+    if (!playing) { phaseStart = ts; return; }
+    const dt = ts - phaseStart;
+
+    if (travelling) {
+      const t = Math.min(1, dt / TRAVEL);
+      // ease-in-out so the request appears to accelerate away and settle
+      const e = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      moveToken(laneX(t), from.y + (to.y - from.y) * e);
+      halo.setAttribute('r', String(13 + Math.sin(t * Math.PI) * 8));
+      if (t >= 1) { travelling = false; phaseStart = ts; show(idx); }
+      return;
+    }
+
+    // pulse while held
+    halo.setAttribute('r', String(12 + Math.sin(dt / 260) * 3));
+    if (dt >= DWELL) advance(1);
+  }
+
+  function advance(dir) {
+    const next = (idx + dir + STEPS.length) % STEPS.length;
+    from = STEPS[idx];
+    to = STEPS[next];
+    idx = next;
+    if (reduced) { moveToken(to.x, to.y); show(idx); phaseStart = performance.now(); return; }
+    travelling = true;
+    phaseStart = performance.now();
+    show(idx, { scroll: true });
+  }
+
+  function jump(i) {
+    idx = (i + STEPS.length) % STEPS.length;
+    travelling = false;
+    phaseStart = performance.now();
+    from = to = STEPS[idx];
+    moveToken(STEPS[idx].x, STEPS[idx].y);
+    show(idx);
+  }
+
+  function setPlaying(v) {
+    playing = v;
+    const b = $('#play');
+    b.innerHTML = v ? '&#10073;&#10073; Pause' : '&#9654; Play';
+    b.setAttribute('aria-label', v ? 'Pause' : 'Play');
+    b.classList.toggle('primary', v);
+    phaseStart = performance.now();
+  }
+
+  /* ------------------------------------------------------------- wiring */
+
+  // A pause the reader asked for has to outlive scrolling away and back, or the
+  // observer below restarts the animation over someone parked on a stage.
+  let userPaused = reduced;
+  const pauseByUser = () => { userPaused = true; setPlaying(false); };
+  const resumeByUser = () => { userPaused = false; setPlaying(true); };
+
+  $('#play').addEventListener('click', () => (playing ? pauseByUser() : resumeByUser()));
+  $('#next').addEventListener('click', () => { pauseByUser(); jump(idx + 1); });
+  $('#prev').addEventListener('click', () => { pauseByUser(); jump(idx - 1); });
+  $('#restart').addEventListener('click', () => { jump(0); resumeByUser(); });
+
+  for (const g of stages) {
+    const n = Number(g.dataset.stage);
+    const pos = STEPS.findIndex((x) => x.s === n);
+    const act = () => {
+      pauseByUser();
+      if (pos !== -1) { jump(pos); return; }
+      // an aside: highlight it and show its card without moving the token
+      for (const o of stages) o.classList.remove('on');
+      g.classList.add('on');
+      paintCaption(ASIDES[n], '·');
+    };
+    g.addEventListener('click', act);
+    g.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); act(); }
+    });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? '')) return;
+    if (e.key === ' ') { e.preventDefault(); playing ? pauseByUser() : resumeByUser(); }
+    else if (e.key === 'ArrowRight') { pauseByUser(); jump(idx + 1); }
+    else if (e.key === 'ArrowLeft') { pauseByUser(); jump(idx - 1); }
+  });
+
+  // Do not animate off-screen: it is wasted work and the viewer misses it anyway.
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver((entries) => {
+      for (const en of entries) {
+        if (en.isIntersecting && !userPaused && !reduced) setPlaying(true);
+        else if (!en.isIntersecting) playing = false;
+      }
+    }, { threshold: 0.12 }).observe(svg);
+  }
+
+  // Only claim the diagram scrolls if it actually does at this width.
+  const hint = $('#scroll-hint');
+  const syncHint = () => { hint.hidden = scroller.scrollWidth <= scroller.clientWidth + 8; };
+  syncHint();
+  addEventListener('resize', syncHint);
+
+  show(0, { scroll: false });
+  moveToken(STEPS[0].x, STEPS[0].y);
+  if (reduced) { document.body.classList.add('no-anim'); setPlaying(false); }
+  phaseStart = performance.now();
+  raf = requestAnimationFrame(step);
+})();
+</script>
+</body>
+</html>

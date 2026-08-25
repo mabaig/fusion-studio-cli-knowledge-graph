@@ -147,7 +147,7 @@ if (argv.includes('--bundle')) {
 if (argv.includes('--site')) {
   const SITE = path.resolve(arg('--site-dir', path.join(KG_ROOT, 'docs')));
   fs.mkdirSync(SITE, { recursive: true });
-  for (const f of ['index.html', 'app.css', 'app.js']) {
+  for (const f of ['index.html', 'app.css', 'app.js', 'how-it-works.html']) {
     fs.copyFileSync(path.join(APP, f), path.join(SITE, f));
   }
   fs.writeFileSync(path.join(SITE, 'data.js'), dataJs);
