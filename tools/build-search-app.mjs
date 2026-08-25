@@ -63,7 +63,7 @@ const KEEP = [
   'layer', 'layerName', 'stackRole', 'appExposed',
   // the authoring corpus
   'corpusRole', 'corpusHalf', 'promptRole', 'modality', 'marker', 'body', 'owner',
-  'section', 'parent', 'level', 'ruleCount', 'specified', 'specFile', 'instanceCount',
+  'section', 'parent', 'level', 'ruleCount', 'specified', 'specFile', 'instanceCount', 'placeholder',
   'kind', 'skill',
   // supported-tool-type classification
   'toolTypeKey', 'toolTypeName', 'toolTypeSource', 'supportedSince', 'artifactCount', 'usedHere',
